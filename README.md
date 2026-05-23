@@ -59,5 +59,4 @@ that monorepo.
 
 ## Authors
 
-Helen E. Payne, with contributions from Devin Gamble (pedigree generation and
-related code in chapter 2). See `git log` for per-file attribution.
+Helen E. Payne, with contributions from Devin Gamble (compiling datasheets). See `git log` for per-file attribution.
