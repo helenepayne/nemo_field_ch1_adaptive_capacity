@@ -1,0 +1,281 @@
+---
+title: "Aster_practice"
+author: "Helen Payne"
+date: "2024-07-25"
+output: html_document
+---
+
+```{r}
+library(aster)
+library(tidyverse)
+library(stringr)
+library(reshape2)
+```
+
+
+
+Example data from Geyer 2017 Aster Package Tutorial
+```{r}
+data(echinacea)
+names(echinacea)
+sapply(echinacea, class)
+vars_test <- c("ld02", "ld03", "ld04", "fl02", "fl03", "fl04", "hdct02", "hdct03", "hdct04")
+redata_test <- reshape(echinacea, varying = list(vars_test), 
+                  direction = "long", timevar = "varb", 
+                  times = as.factor(vars_test), v.names ="resp")
+levels(redata_test$varb)
+times = as.factor(vars_test)
+redata_test[42, ]
+redata_test <- data.frame(redata_test, root = 1)
+names(redata_test)
+pred_test <- c(0, 1, 2, 1, 2, 3, 4, 5, 6)
+fam_test <- c(1, 1, 1, 1, 1, 1, 3, 3, 3)
+sapply(fam.default(), as.character)[fam_test]
+all(pred_test < seq(along = pred_test))
+
+aout1 <- aster(resp ~ varb + nsloc + ewloc + pop, pred_test, fam_test, varb, id, root, data = redata_test)
+
+summary(aout1, show.graph = TRUE)
+
+aout2 <- aster(resp ~ varb + nsloc + ewloc, pred_test, fam_test, varb, id, root, data = redata_test)
+
+anova(aout2, aout1)
+
+hdct <- grep("hdct", as.character(redata_test$varb)) #to create an interaction term between hdct and pop
+hdct <- is.element(seq(along = redata_test$varb), hdct)
+redata_test <- data.frame(redata_test, hdct = as.integer(hdct))
+names(redata_test)
+aout3 <- aster(resp ~ varb + nsloc + ewloc + pop * hdct, pred_test, fam_test, varb, id, root, data = redata_test) #includes the interaction term
+summary(aout3)
+aout4 <- aster(resp ~ varb + nsloc + ewloc + pop * hdct - pop, pred_test, fam_test, varb, id, root, data = redata_test) #includes the interaction term, and gets rid of population
+summary(aout4)
+anova(aout2, aout4, aout3)
+conf.level <- 0.95
+crit <- qnorm((1 + conf.level) / 2)
+fred_test <- summary(aout4)
+dimnames(fred_test$coef)
+fred_test$coef["popEriley:hdct", "Estimate"] + c(-1, 1) * crit * fred_test$coef["popEriley:hdct", "Std. Error"]
+aout4$coef[12] + c(-1, 1) * crit * sqrt(solve(aout4$fish)[12, 12])
+
+inv.fish.info <- solve(aout4$fish)
+
+(aout4$coef[12] - aout4$coef[13]) + c(-1, 1) * crit *sqrt(inv.fish.info[12, 12] + inv.fish.info[13, 13] - 2 * inv.fish.info[12, 13])
+
+#Predictions
+newdata_test <- data.frame(pop = levels(echinacea$pop))
+for (v in vars)
+  newdata_test[[v]] <- 1
+newdata_test$root <- 1
+newdata_test$ewloc <- 0
+newdata_test$nsloc <- 0
+
+renewdata <- reshape(newdata_test, varying = list(vars), direction = "long", timevar = "varb", times = as.factor(vars), v.names="resp")
+hdct <- grep("hdct", as.character(renewdata$varb))
+hdct <- is.element(seq(along = renewdata$varb), hdct)
+renewdata <- data.frame(renewdata, hdct = as.integer(hdct))
+names(redata)
+names(renewdata)
+
+nind <- nrow(newdata_test)
+nnode <- length(vars)
+amat <- array(0, c(nind, nnode, nind))
+for (i in 1:nind)
+  amat[i , grep("hdct", vars), i] <- 1
+```
+
+
+
+Create a dataframe for Aster:
+```{r}
+#load in the data, rename surv to fruitpod, and create a sample_ID column for 2022 data
+
+# Load and preprocess data
+HR_fit <- read_csv(here::here("data_sheets", "compiled_sheets", "HR_22_23_fit.csv")) %>%
+  rename_at(vars(49), ~"surv_to_fruitpod") %>%
+  mutate(
+    # Construct sample_ID conditionally
+    sample_ID = case_when(
+      is.na(SegPos) ~ paste(Year, Recipient, Gen, str_pad(Transect, width = 3, pad = "0"), Plant_ID, sep = "-"),
+      TRUE ~ paste(Year, Recipient, Gen, str_pad(Transect, width = 3, pad = "0"), SegPos, Plant_ID, sep = "-")
+    ),
+    # Replace leading underscores in sample_ID with hyphens
+    sample_ID = str_replace(sample_ID, "^([^_]*)_", "\\1-")
+  )
+
+```
+
+
+```{r}
+# Define the update_zeros function
+update_zeros <- function(df) {
+  for (i in 1:nrow(df)) {
+    if (df$surv_to_flower[i] == 0) {
+      df$surv_to_fruitpod[i] <- 0
+      df$total_fruits[i] <- 0
+      df$prod_closed_fruits[i] <- 0
+      df$prod_filled_seeds[i] <- 0
+      df$filled_seeds[i] <- 0
+    }
+    if (df$surv_to_fruitpod[i] == 0) {
+      df$total_fruits[i] <- 0
+      df$prod_closed_fruits[i] <- 0
+      df$prod_filled_seeds[i] <- 0
+      df$filled_seeds[i] <- 0
+    }
+    if (df$prod_closed_fruits[i] == 0) {
+      df$prod_filled_seeds[i] <- 0
+      df$filled_seeds[i] <- 0
+    }
+    if (df$prod_filled_seeds[i] == 0) {
+      df$total_seeds[i] <- 0
+    }
+  }
+  return(df)
+}
+
+# Apply the function to the dataset
+HR_fit_updated <- update_zeros(HR_fit)
+
+# Remove rows with NA in the treatment column
+HR_fit_clean <- HR_fit_updated %>% filter(!is.na(skel_dryweight_mg))
+```
+
+
+```{r}
+# Define the graph structure based on fitness variables
+vars <- c("surv_to_flower", "surv_to_fruitpod", "total_fruits", "prod_closed_fruits", "prod_filled_seeds", "filled_seeds")
+
+# Create the redata dataframe
+redata <- data.frame(
+  id = HR_fit_clean$sample_ID,
+  surv_to_flower = as.integer(HR_fit_clean$surv_to_flower),
+  surv_to_fruitpod = as.integer(HR_fit_clean$surv_to_fruitpod),
+  total_fruits = as.integer(HR_fit_clean$total_fruits),
+  prod_closed_fruits = as.integer(HR_fit_clean$prod_closed_fruits),
+  prod_filled_seeds = as.integer(HR_fit_clean$prod_filled_seeds),
+  filled_seeds = as.integer(HR_fit_clean$filled_seeds),
+  transect = HR_fit_clean$Transect,
+  donor = HR_fit_clean$Donor,
+  recipient = HR_fit_clean$Recipient,
+  skel_biomass = HR_fit_clean$skel_dryweight_mg
+)
+
+
+# Reshape data from wide to long format using reshape2::melt
+redata_long <- melt(redata, id.vars = c("id", "donor", "recipient", "transect", "skel_biomass"), 
+                    measure.vars = vars, 
+                    variable.name = "varb", 
+                    value.name = "resp")
+
+
+# Check reshaped data
+summary(redata_long)
+
+levels(redata_long$varb)
+
+times = as.factor(vars)
+
+#this step checks that the reshape worked. The number of rows should be equal
+nrow(redata_long)
+nrow(redata)*length(vars)
+
+#add in root to the long version of redata
+redata_long <- data.frame(redata_long, root = 1)
+
+#double-check reshape long data
+names(redata_long)
+
+#Sed pred (based on parent and child nodes) and family (1 = Bronuli, 3 = truncated poison)
+pred <- c(0, 1, 2, 2, 4, 5)
+fam <- c(1, 1, 3, 1, 1, 3)
+
+#make sure family is as character
+sapply(fam.default(), as.character)[fam]
+
+#make sure this is True/ Pred==0 is root
+all(pred < seq(along = pred))
+
+#create my model
+mod1 <- aster(resp ~ varb + transect + donor + recipient, pred, fam, varb, id, root, data = redata_long)
+
+#summarize the model
+summary(mod1, show.graph = TRUE)
+
+#create a model without transect
+mod2 <- aster(resp ~ varb +  donor + recipient, pred, fam, varb, id, root, data = redata_long)
+
+#compare models 1 and 2, make sure they are nested!
+anova(mod2, mod1)
+#The simpler model without Transect (mod2) is the best
+
+##determining confidence intervals
+conf.level <- 0.95
+crit <- qnorm((1 + conf.level) / 2)
+fred <- summary(mod2)
+dimnames(fred$coef)
+fred$coef["varbprod_filled_seeds", "Estimate"] + c(-1, 1) * crit * fred$coef["varbprod_filled_seeds", "Std. Error"]
+
+mod2$coef[5] + c(-1, 1) * crit * sqrt(solve(mod2$fish)[5, 5]) 
+#7 represents the variable number in dimnames(fred$coef)
+
+inv.fish.info <- solve(mod2$fish)
+
+#compare confidence intervals between 2 donors (?)
+(mod2$coef[8] - mod2$coef[9]) + c(-1, 1) * crit *sqrt(inv.fish.info[8, 8] + inv.fish.info[9, 9] - 2 * inv.fish.info[8, 9])
+
+### determining fitness estimates ### 
+#is this accurate?#
+
+mean_value_params <- predict(mod2, type = "mean.value")
+
+# Reshape the mean_value_params to align with the original data
+redata_long$mean_value_params <- mean_value_params
+
+# Sum the expected values for each individual
+estimated_fitness <- aggregate(mean_value_params ~ id, data = redata_long, sum) %>%
+  rename(sample_ID = 1, fit_est = 2)
+
+HR_fit_clean_with_fitness <- merge(HR_fit_clean, estimated_fitness, by = "sample_ID")
+```
+
+
+```{r}
+redata_long$fit <- ifelse(redata_long$varb == "filled_seeds", 1, 0)
+
+#Model 1b - selection on skel_biomass
+mod3 <- aster(resp ~ varb + fit:(skel_biomass), pred, fam, varb, id, root, data = redata_long)
+summary(mod3, show.graph = TRUE)
+
+##the model if all variables were included
+#astBB_m2 <- aster(resp ~ varb + fit:(d13C + stem + fdiam + doy + fdur + biom), pred,
+#↪ fam, varb, id, root, data = re_BB1)
+
+ast_out1 <- predict(mod3) #MLE of the saturated model mean value parameter vector
+#↪ (mu)
+
+ast_out1 <- matrix(ast_out1, nrow = nrow(mod3$x), ncol = ncol(mod3$x))
+colnames(ast_out1) <- colnames(mod3$x) #Expected mean fitness based on aster model
+#Variation in predictions of individual fitness are based on individual variation in DOY
+
+#Use fecundity (total seeds) as predicted fit estimate - accounts for predecessor states
+    #↪ (surv_to_flower, surv_to_fruitpod, total_fruits, prod_closed_fruits,           ##prod_filled_seeds, filled_seeds) in estimates
+
+fit_pred <- ast_out1[, grep("filled_seeds", colnames(ast_out1))]
+length(fit_pred)
+```
+
+```{r}
+#Calculate Relative Fitness
+rel_fit_pred <- fit_pred/mean(fit_pred)
+#merge into data set
+HR_fit_v1 <- data.frame(HR_fit_clean, rel_fit_pred)
+
+#### Estimate selection on DOY using predicted lifetime fitness generated by aster
+psga_m1 <-lm(rel_fit_pred ~ DOY_z, data = BB_df7)
+summ(psga_m1, digits = getOption("jtools-digits", 5))
+```
+
+
+
+
+

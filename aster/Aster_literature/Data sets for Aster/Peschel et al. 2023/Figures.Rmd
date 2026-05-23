@@ -1,0 +1,487 @@
+---
+title: "temp_precip_normals"
+author: "Anna R. Peschel"
+output: pdf_document
+---
+
+#Figure 1: Study site climate normals 
+```{r}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+library(tidyverse)
+library(raster)
+#library(rgdal) #old package no longer available
+library(ggplot2)
+library(sp)
+library(rgeos)
+library(gridExtra)
+library(ggspatial)
+library(sf)
+# Install devtools if you don't have it already
+#install.packages("devtools")
+
+# Load the devtools package
+library(devtools)
+
+# Install the rnaturalearthhires package from GitHub
+#devtools::install_github("ropensci/rnaturalearthhires")
+
+library(rnaturalearth)
+
+# Load the temperature raster
+temprast <- raster("PRISM_tmean_30yr_normal.tif")
+
+# Get the USA shapefile from rnaturalearth package
+usa_sf <- ne_states(country = "united states of america", returnclass = "sf")
+
+# Transform CRS to a recent format (e.g., EPSG:4326)
+usa_sf <- st_transform(usa_sf, crs = 4326)
+
+# Select the states of interest for the tristate area
+tristate_sf <- usa_sf[usa_sf$name %in% c("Minnesota", "North Dakota", "South Dakota"),]
+
+# Crop the raster to the tristate area
+temprast_tristate <- crop(temprast, extent(tristate_sf))
+
+# Convert raster to data frame
+df <- as.data.frame(temprast_tristate, xy = TRUE)
+
+# Data for the points and labels
+labels_data <- data.frame(
+  x = c(-91.971, -95.6169, -98.0135),
+  y = c(44.2617, 43.5055, 43.06538),
+  label = c("ML(home site)", "LB", "SD")
+)
+# To add a line break within the label, you can use "\n" in the label text:
+labels_data$label[labels_data$label == "ML(home site)"] <- "ML\n(home site)"
+
+plot1 <- ggplot() +
+  geom_raster(data = df, aes(x = x, y = y, fill = PRISM_tmean_30yr_normal)) +
+  scale_fill_gradientn(colours = hcl.colors(8, "YlOrRd", rev = TRUE), na.value = "white") +
+  geom_sf(data = tristate_sf, fill = NA, color = "black") +
+  geom_point(data = labels_data, aes(x = x, y = y), shape = 16, size = 3, color = "white") +  # White points
+  geom_text(data = labels_data, aes(x = x, y = y, label = label),
+            nudge_y = c(-0.06, 0.05, 0.05),  # Adjust vertical position for each label
+            vjust = c(-.3, -0.35, -0.3),   # Adjust the vertical alignment for each label
+            size = 5, color = "white") +  # Larger and white text labels
+  labs(x = "Longitude", y = "Latitude", fill = expression(~Degree~C)) +
+  coord_sf(crs = 4326) +
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(colour = "black", size = 14),
+        axis.ticks = element_line(colour = "black", linewidth = 0.5),
+        axis.title = element_text(size = 16, face = "bold"),
+        panel.border = element_rect(fill = NA, colour = "black"))
+
+# Plot plot1
+print(plot1)
+
+###do the same for precipitation as for temperature. Store the .tif file in your working directory
+preciprast =raster("PRISM_ppt_30yr_normal.tif")
+
+# Crop the raster to the tristate area
+preciprast_tristate <- crop(preciprast, extent(tristate_sf))
+
+# Convert raster to data frame
+df_precip <- as.data.frame(preciprast_tristate, xy = TRUE)
+
+## Rename the columns
+names(df_precip) <- c("x", "y", "precip")
+
+# Plot the data
+plot2<- ggplot() +
+  geom_raster(data = df_precip, aes(x = x, y = y, fill = precip), interpolate = TRUE) +
+  scale_fill_gradientn(colours = hcl.colors(8, "blues", rev = TRUE), na.value = "white") +
+  geom_sf(data = tristate_sf, fill = NA, color = "black") +
+  geom_point(data = labels_data, aes(x = x, y = y), shape = 16, size = 3, color = "white") +  # White points
+  geom_text(data = labels_data, aes(x = x, y = y, label = label),
+            nudge_y = c(-0.06, 0.05, 0.05),  # Adjust vertical position for each label
+            vjust = c(-.3, -0.35, -0.3),   # Adjust the vertical alignment for each label
+            size = 5, color = "white") +  # Larger and white text labels
+  labs(x = "Longitude", y = "Latitude", fill = "mm") +
+  coord_sf(crs = 4326) +
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(colour = "black", size = 14),
+        axis.ticks = element_line(colour = "black", linewidth = 0.5),
+        axis.title = element_text(size = 16, face = "bold"),
+        panel.border = element_rect(fill = NA, colour = "black"))
+
+# Combine plots into a single page using gridExtra
+grid.arrange(plot1, plot2, nrow = 2)
+
+# Save to a .png file
+ggsave("combined_plots.png", arrangeGrob(plot1, plot2, nrow = 2), dpi = 1200, width = 9, height = 10)
+```
+
+#Figure 2: predicted and realized fitness
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+
+#load data
+fitness<-read_csv(here::here("w_bothyears_peschel.csv"))
+fitness <- w_bothyears_peschel
+
+#make year a factor
+fitness$year<-as.factor(fitness$Year)
+
+fitness_new <- fitness %>%
+  mutate(fitness_var = paste(Generation, Year)) %>%
+  mutate(Site = fct_relevel(Site, "McCarthy Lake (home site)", "Lake Bella (middle site)", "South Dakota (westernmost site)"),
+         fitness_var = fct_relevel(fitness_var, "Parental estimate 2018", "FTNS prediction for progeny 2018", "Parental estimate 2019", "Progeny estimate 2019"))
+
+my.labels <- c("Parental\nYear 1", 
+               "Progeny \nFTNS prediction",
+               "Parental\nYear 2", 
+               "Progeny\nYear 2")
+#plot
+ggplot(fitness_new, aes(x = fitness_var, y = Fitness)) +
+  geom_point(size=3) +
+  geom_errorbar(aes(ymin = Fitness - SE, ymax = Fitness + SE), width = 0.1) +
+  scale_x_discrete(position = "top", labels = my.labels) +
+  labs(x = "") +
+  geom_hline(yintercept=1, lty=2) +
+  ylab('Mean lifetime fitness')+
+  facet_wrap(~Site, nrow = 3, scales = "free_y")+
+   theme(panel.grid.major = element_blank(), 
+         panel.grid.minor = element_blank(), 
+         panel.background = element_blank(),
+         panel.border = element_rect(fill=NA),
+         axis.line.y = element_line(colour = "black"),
+         strip.text = element_text(face = "bold", size = 14),
+         axis.text.x = element_text(size=13),
+         axis.text.y = element_text(size=13),
+         axis.title.y = element_text(face="bold",size=14))
+
+#this is code to save the figure        
+ggsave("yr1_yr2_fitness_prediction.png", device = "png", dpi = 1200)
+```
+
+#Figure 3: Breeding values and corelation coefficients
+###Same site between years
+```{r}
+library(ggplot2)
+library(patchwork)
+
+#load data
+BV<-read.csv("BV_all_sites.csv")
+
+#plot McCarthy Lake breeding values between years
+ML_ML<-ggplot(BV, aes(x=BV_ML_2018, y=BV_ML_2019)) +
+  geom_point(size=2, color="black") +
+  ylab("ML (home) year 2") +
+  xlab("ML (home) year 1") +
+   theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+axis.text.x = element_text(face="bold", color="black",size= 12),
+axis.text.y = element_text(face="bold", color="black", size = 12), 
+axis.line.x = element_line(color="black", size = 0.4),
+axis.line.y = element_line(color="black", size = 0.4),
+axis.title.y= element_text(size=14, face="bold"),
+axis.title.x= element_text(size=14, face="bold"),
+    panel.border = element_rect(colour = "black", fill=NA, size=0.4))
+     
+ML_ML  
+BV<-as.data.frame(BV)
+attach(BV)
+#calculate the correlation coefficient
+cor.test(BV_ML_2018, BV_ML_2019, method="pearson")
+
+#Plot the Lake Bella breeding values between years
+LB_LB<-ggplot(BV, aes(x=BV_LB_2018, y=BV_LB_2019)) +
+  geom_point(size=2, color="black") +
+  ylab("LB year 2") +
+  xlab("LB year 1") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+axis.text.x = element_text(face="bold", color="black",size= 12),
+axis.text.y = element_text(face="bold", color="black", size = 12), 
+axis.line.x = element_line(color="black", size = 0.4),
+axis.line.y = element_line(color="black", size = 0.4),
+axis.title.y= element_text(size=14, face="bold"),
+axis.title.x= element_text(size=14, face="bold"),
+    panel.border = element_rect(colour = "black", fill=NA, size=0.4)
+  )     
+LB_LB
+BV<-as.data.frame(BV)
+attach(BV)
+#calculate the correlation coefficient 
+cor.test(BV_LB_2018, BV_LB_2019, method="pearson")
+
+#Plot South Dakota site breeding values between years 
+SD_SD<-ggplot(BV, aes(x=BV_SD_2018, y=BV_SD_2019)) +
+  geom_point(size=2, color="black") +
+  ylab("SD year 2") +
+  xlab("SD year 1") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+axis.text.x = element_text(face="bold", color="black",size= 12),
+axis.text.y = element_text(face="bold", color="black", size = 12), 
+axis.line.x = element_line(color="black", size = 0.4),
+axis.line.y = element_line(color="black", size = 0.4),
+axis.title.y= element_text(size=14, face="bold"),
+axis.title.x= element_text(size=14, face="bold"),
+    panel.border = element_rect(colour = "black", fill=NA, size=0.4)
+  )  
+SD_SD
+BV<-as.data.frame(BV)
+attach(BV)
+#correlation coefficient
+cor.test(BV_SD_2018, BV_SD_2019, method="pearson")
+
+#combine plots using patchwork
+patchwork1<-(ML_ML|LB_LB|SD_SD)
+patchwork1
+
+#save plots
+ggsave("BV_samesite.png", device = "png", dpi = 1200)
+```
+
+#Figure S1: Probability density distribution of parental breeding values
+```{r}
+library(ggplot2)
+library(patchwork)
+#load data
+BV<-read.csv("BV_all_sites.csv")
+
+#density McCarthy Lake 2018
+density_ML_1<-ggplot(BV, aes(x=BV_ML_2018))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="Breeding values ML year 1")+ 
+        scale_x_continuous(limits=c(0,400))
+density_ML_1
+
+#density McCarthy Lake 2019
+density_ML_2<-ggplot(BV, aes(x=BV_ML_2019))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="Breeding values ML year 2")+ 
+        scale_x_continuous(limits=c(0,4))
+density_ML_2
+
+#density Lake Bella 2018
+density_LB_1<-ggplot(BV, aes(x=BV_LB_2018))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_blank(),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(x="Breeding values LB year 1") +
+        scale_x_continuous(limits=c(0,0.13))
+density_LB_1
+
+#density Lake Bella 2019
+density_LB_2<-ggplot(BV, aes(x=BV_LB_2019))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_blank(),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(x="Breeding values LB year 2") +
+        scale_x_continuous(limits=c(0,1.5))
+density_LB_2
+
+#density South Dakota 2018
+density_SD_1<-ggplot(BV, aes(x=BV_SD_2018))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_blank(),
+        legend.title=element_text(face="bold", size=14)) +
+  labs(x= "Breeding values SD year 1") + 
+        scale_x_continuous(limits=c(0,30))
+density_SD_1
+
+#density South Dakota 2019
+density_SD_2<-ggplot(BV, aes(x=BV_SD_2019))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_blank(),
+        legend.title=element_text(face="bold", size=14)) +
+        scale_x_continuous(limits=c(0,7))+
+        labs(x="Breeding values SD year 2")
+density_SD_2
+
+#combine plots using patchwork
+patchwork<-(density_ML_1/density_ML_2|density_LB_1/density_LB_2|density_SD_1/density_SD_2)
+
+#code to save plot
+ggsave('prob_density_BV.png', patchwork, device="png", dpi=1200)
+```
+
+#Figure S2: Temp & precip normals
+```{r}
+library(tidyverse)
+library(prism)
+library(raster)
+library(sp)
+library(rgdal)
+library(patchwork)
+
+#plotting temperature and precipitation data over the last 10 years 
+geoInfo<-read.csv("geo_info_cf.csv", header=T)
+
+ls(geoInfo)
+#should be numeric
+class(geoInfo$latitude)
+#should be numeric
+class(geoInfo$longitude)
+#should be a factor
+class(geoInfo$population)
+geoInfo$population<-as.factor(geoInfo$population)
+
+#set your prism directory
+prism_set_dl_dir("C:/Users/arhpe/OneDrive/Documents/prismtmp/")
+
+#this is for the whole country and then you have to subset based on your lat/long data. Mon is month= May to October which is the growing season. 
+get_prism_monthlys(type = "tmean", years = 1984:2021, mon = 5:10)
+get_prism_monthlys(type = "tmin", years = 1984:2021, mon = 5:10)
+get_prism_monthlys(type = "tmax", years = 1984:2021, mon = 5:10)
+get_prism_monthlys(type = "ppt", years = 1984:2021, mon = 5:10)
+length(prism_archive_ls())
+
+RS <- pd_stack(prism_archive_ls())
+
+#extract for specific points
+mycrs <- RS@crs@projargs
+sites <- geoInfo 
+coordinates(sites) <- c('longitude', 'latitude')
+proj4string(sites) <- CRS(mycrs)
+sites.clim <- data.frame(coordinates(sites), sites$population, extract(RS, sites))
+
+#here 4 is from the 4 types of climate data from prism
+sites.clim1 <- sites.clim %>%
+  gather(date, value, 4:ncol(sites.clim)) %>%
+  separate(4, sep = "_", into = c("a", "var", "c", "d", "date", "e")) %>%
+  dplyr::select(-c(a,c,d,e)) %>%
+  separate(date, into = c("year", "month"), sep = 4) %>%
+  group_by(sites.population, var, year) %>%
+  filter(year< 2020) %>%
+  dplyr::summarise(season_mean = mean(value),
+                   season_min = min(value),
+                   season_max = max(value),
+                   season_cum = sum(value),
+                   longitude = mean(longitude),
+                   latitude = mean(latitude)) 
+```
+
+###subset into temp and precip
+```{r}
+# Install and load cowplot package
+install.packages("cowplot")
+library(cowplot)
+
+temp_mean<-subset(sites.clim1, var=="tmean")
+precip_mean<-subset(sites.clim1, var=="ppt")
+
+# Convert the 'year' variable to numeric
+temp_mean$year <- as.numeric(as.character(temp_mean$year))
+precip_mean$year <- as.numeric(as.character(precip_mean$year))
+
+# Custom line colors you want to use
+custom_colors <- c("blue", "orange", "purple")
+
+# Combine the two data frames to get all sites for the color mapping
+all_sites <- unique(c(temp_mean$sites.population, precip_mean$sites.population))
+
+# plot temperature data
+temp_plot <- ggplot(temp_mean, aes(x = year, y = season_mean, group = sites.population, color = sites.population)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 12, face = "plain"),
+        legend.title = element_text(size = 14, face = "plain"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line.x = element_line(color = "black", size = 0.5),
+        axis.line.y = element_line(color = "black", size = 0.5),
+        axis.line = element_blank(),
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.title.x = element_blank(),  # Remove x-axis title from the top plot
+        axis.title.y = element_text(size = 12, face = "bold")) +  # Use the same size and boldness for y-axis title
+  labs(y = "Average mean monthly temperature May-October (\u00B0C)", color = "Study sites") +
+  scale_x_continuous(breaks = seq(min(temp_mean$year), max(temp_mean$year), by = 5)) +
+  scale_color_manual(values = custom_colors, breaks = all_sites)
+
+# plot precipitation data
+precip_plot <- ggplot(precip_mean, aes(x = year, y = season_mean, group = sites.population, color = sites.population)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line.x = element_line(color = "black", size = 0.5),
+        axis.line.y = element_line(color = "black", size = 0.5),
+        axis.line = element_blank(),
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.title.x = element_text(size = 14, face = "bold"),  # Retain x-axis title in the bottom plot
+        axis.title.y = element_text(size = 12, face = "bold")) +  # Use the same size and boldness for y-axis title
+  labs(y = "Total precipitation May-October (mm)", x = "Year", color = "Study sites") +
+  scale_x_continuous(breaks = seq(min(precip_mean$year), max(precip_mean$year), by = 5)) +
+  scale_color_manual(values = custom_colors, breaks = all_sites)
+
+# Combine plots using cowplot functions and adjust the width and height
+combined_plot <- plot_grid(temp_plot, precip_plot, nrow = 2, align = 'h', axis = 'lr', rel_heights = c(4, 5))
+
+# Add a single legend at the center-left of the combined plot
+combined_plot_with_legend <- cowplot::get_legend(temp_plot) +
+  theme(legend.position = "left")
+
+final_plot <- plot_grid(combined_plot, combined_plot_with_legend, ncol = 2, rel_widths = c(0.9, 0.1), align = 'h')
+
+# Save the final plot with white background and higher dpi for better visibility
+ggsave('temp_precip_normals.png', final_plot, device = "png", dpi = 1200, width = 9, height = 11.5, bg = "white")
+```

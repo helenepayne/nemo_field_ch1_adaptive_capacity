@@ -1,0 +1,615 @@
+---
+title: "selection gradient"
+output: pdf_document
+---
+#Load data
+```{r}
+# using code from C. Geyer TR 675 found here: https://conservancy.umn.edu/handle/11299/56394
+#load library
+library(aster)
+
+#load data
+SV<- read.csv("~sla_fit.csv")
+
+#remove SLA values with a mass less than 10mg because it inflates the sample variance
+SV=SV[which(SV[,8]>10),]
+
+#create variable SLA_S to reduce the order of magnitude of SLA so aster can run
+SV$SLA_S<-(SV$SLA_cm2_g/100)
+```
+
+#Set up aster on whole dataset (both treatments)
+```{r}
+#aster graphical model includes two nodes, survival to flowering ("FloweringPlant) and number of seeds produced ("Fitness")
+vars<-c("FloweringPlant","Fitness")
+
+#reshape dataset to long format so each plant has an entry for each node above
+SV_mod <- reshape(SV,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#these should be equal if the reshape was done correctly
+nrow(SV_mod)
+nrow(SV)*length(vars)
+
+#establish a root for the aster graphical model(root-> SurviveFlowering->Fitness)
+SV_aster <- data.frame(SV_mod, root=1)
+
+#designate the distributions of the two aster model nodes, which is fam (bernoulli=1, poisson=2)
+pred <- c(0,1)
+fam<-c(1,2)
+sapply(fam.default(), as.character)[fam]
+
+#show aster graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the aster graphical model
+level <- gsub("[0-9]","", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+
+#Confirms the correct levels- should be aster nodes 
+levels(SV_aster$level)
+
+#creating the fitness variable of interest (here "fit")
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+
+#now replace SLA values with zero for varb "flowering plant"
+SV_aster[1:243, 7]<-0
+SV_aster[1:243, 8]<-0
+```
+
+#Variable selection analysis of SLA with likelihood ratio tests 
+```{r}
+vmod_1 <-aster(resp~varb+fit:SLA_S+ fit:Treatment, pred, fam, varb, id, root, data =SV_aster) 
+summary(vmod_1, info.tol = 1e-9)
+
+vmod_2<-aster(resp~varb+fit:SLA_S+fit:Treatment+fit:Treatment*SLA_S, pred, fam, varb, id, root, data =SV_aster) 
+summary(vmod_2, info.tol = 1e-9)
+
+vmod_3<-aster(resp~varb+fit:SLA_S, pred, fam, varb, id, root, data =SV_aster)
+summary(vmod_3, info.tol = 1e-10)
+
+#model comparison to test for significance of the SLAxTreatment interaction 
+anova(vmod_1, vmod_2) 
+#model comparison to test for significance of Treatment
+anova(vmod_3, vmod_1)
+```
+
+#Subset SV into drought(reduced rain) and ambient(full rain)
+```{r}
+#reduced rain
+SV_D <-subset(SV, Treatment == "Drought")
+#full rain
+SV_A <-subset(SV, Treatment == "Ambient")
+```
+
+#Reduced rain set up for aster
+```{r}
+#establish the nodes of the aster graphical model
+vars<-c("FloweringPlant","Fitness")
+
+#reshape the dataset into longform so each plant has an entry for each node above
+SV_d_mod <- reshape(SV_D,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#these should be equal if the reshape was done correctly
+nrow(SV_d_mod)
+nrow(SV_D)*length(vars)
+
+#add a root to the aster model
+SV_aster <- data.frame(SV_d_mod, root=1)
+
+##assign the distribution to the aster nodes
+#assign two nodes
+pred <- c(0,1)
+
+#assign the distribution to the nodes (1=bernoulli 2= poisson)
+fam<-c(1,2)
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the graphical model
+level <- gsub("[0-9]","", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+
+#Confirms the correct levels(should be the two designated nodes)
+levels(SV_aster$level)
+
+#creating the fitness variable of interest (here "fit")
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+
+#replace SLA values with zero for varb flowering plant in the data frame
+SV_aster[1:112,7]<-0
+SV_aster[1:112,8]<-0
+```
+
+#Reduced rain selection coefficient 
+```{r}
+w<-SV_D$Fitness/mean(SV_D$Fitness) 
+z1 <- SV_D$SLA_S - mean(SV_D$SLA_S)
+bout <- lm(w ~ z1)
+bout<-lm(w~0+z1, offset=rep(1, length(w)))
+summary(bout)
+beta<-as.numeric(bout$coefficients)
+print(beta)
+```
+
+#reduced rain fixed effect aster model comparison 
+```{r}
+#model comparison using likelihood ratio tests to determine significance of linear and squared SLA term. 
+#model with no SLA term
+out6<-aster(resp~varb, pred, fam, varb, id, root, data=SV_aster)
+summary(out6)
+
+#model with linear term (directional selection)
+out6_2 <-aster(resp~varb+fit:SLA_S, pred, fam, varb, id, root, data =SV_aster) 
+summary(out6_2, info.tol = 1e-12)
+
+#Model comparion using likelihood ratio tests to determine significance of linear term fit:SLA_S 
+#SLA_S not significant in model (p=0.18). No signficiant difference in model with or without SLA
+anova(out6, out6_2) 
+
+#model with linear and squared (quadratic) SLA term
+out6_3<-aster(resp~varb+fit:SLA_S+ fit:I(SLA_S^2), pred, fam, varb, id, root, data=SV_aster)
+summary(out6_3, info.tol=1e-12)
+
+#model comparison using likelihood ratio tests to determine significance of the SLA_S^2 term. Neither the squared or linear term is significant.
+anova(out6_2, out6_3) 
+```
+
+#Reduced rain selection gradient  
+```{r}
+#Even though no significant selection gradient was detected, we will determine the selection gradiennt for the linear term using model out6_2 above
+pout6 <- predict(out6_2)
+pout6 <- matrix(pout6, nrow = nrow(out6_2$x), ncol = ncol(out6_2$x))
+colnames(pout6) <- colnames(out6_2$x)
+
+#germ is used here for fitness in the technical report example because fitness was determined as the number that germinated the next year. In this work fitness is determined as the number of seeds produced at the end of the season which is noted by "Fitness" in the dataframe
+mufit <- pout6[, grep("Fitness", colnames(pout6))]
+
+#should equal the number of individuals you have
+length(mufit)
+
+#calculating the relative fitness of each individual
+wmu<-mufit/mean(mufit)
+
+#coefficient for the estimate is the selection gradients
+wmout <-lm(wmu~z1) 
+summary(wmout) 
+
+#should be equal
+all.equal(beta, as.numeric((wmout$coefficients[-1]))) 
+```
+
+#Reduced rain selection gradient confidence intervals
+```{r}
+z <- cbind(z1, deparse.level = 0)
+zvarinv <- solve(t(z) %*% z/nrow(z))
+zwcov <- t(z) %*% cbind(mufit)/nrow(z)
+all.equal(beta, as.numeric(zvarinv %*% zwcov)/mean(mufit))
+
+mu <- predict(out6_2)
+amat <- matrix(0, nrow = length(mufit), ncol = length(mu))
+blank <- matrix(0, nrow = nrow(pout6), ncol = ncol(pout6))
+
+blank.idx <- grep("Fitness", colnames(pout6)) 
+ for (i in 1:nrow(amat)) {
+ boom <- blank
+ boom[i, blank.idx] <- 1
+ amat[i, ] <- as.vector(boom)
+ }
+
+all.equal(mufit, as.vector(amat %*% mu))
+
+bmat <- zvarinv %*% t(z) %*% amat/nrow(z)
+all.equal(beta, as.numeric(bmat %*% mu)/mean(as.numeric(amat %*% mu)))
+
+cmat <- apply(amat,2, sum)/nrow(z) 
+cmat <- rbind(cmat)
+all.equal(beta, as.numeric(bmat %*% mu)/as.numeric(cmat %*%mu))
+
+dmat <- rbind(bmat, cmat, deparse.level = 0)
+all.equal(beta, as.numeric(dmat %*% mu)[1]/as.numeric(dmat %*%mu)[2])
+
+d3way <- array(as.vector(t(dmat)), dim = c(dim(out6_2$modmat)[1:2], nrow(dmat)))
+dout <- predict(out6_2, amat = d3way, se.fit = TRUE, info.tol = 1e-10)
+all.equal(beta, dout$fit[1]/dout$fit[2])
+
+zeta1 <- dout$fit[1]
+zeta2 <- dout$fit[2]
+jacobian <- rbind(c(1/zeta2,-zeta1/zeta2^2), c(1/zeta2, -zeta1/zeta2^2))
+
+dvar <- dout$gradient %*% solve(out6_2$fisher) %*% t(dout$gradient)
+all.equal(dout$se.fit, sqrt(diag(dvar)))
+print(dvar)
+
+bvar <- jacobian %*% dvar %*% t(jacobian)
+print(bvar)
+
+foo <- cbind(beta, sqrt(diag(bvar)))
+colnames(foo) <- c("beta", "se(beta)")
+print(foo)
+```
+
+#Reduced rain fitness landscape plot
+```{r}
+plot(SV_D$SLA_S, SV_D$Fitness,xlab =expression("Specific Leaf Area (cm"^2~ g^-1*")"), ylab="Fitness (average seeds per plant)")
+
+ufoo <- par("usr")
+nx <- 101
+x <- seq(ufoo[1], ufoo[2], length = nx)
+xx <- as.vector(x)
+n <- length(xx)
+
+newdata1 <- data.frame(varb = factor(rep("FloweringPlant", n), levels = levels(out6_2$data$varb)), SLA_S = rep(0, n), resp = rep(1,n), id = 1:n)
+
+newdata2 <- data.frame(varb = factor(rep("Fitness", n), levels = levels(out6_2$data$varb)), SLA_S= xx, resp = rep(1, n), id = 1:n)
+
+newdata <- rbind(newdata1, newdata2)
+newdata$fit <- ifelse(newdata$varb == "Fitness", 1, 0)
+
+pout <- predict(out6_2, newdata = newdata, varvar = varb, idvar = id, root = rep(1, 2 * n))
+
+zz <- pout[newdata$varb == "Fitness"]
+zz <- matrix(zz, nx)
+lines(x, zz)
+
+#now make the plot again but use the raw SLA values
+plot(SV_D$SLA_cm2_g, SV_D$Fitness,  xlab =expression("Specific Leaf Area (cm"^2~ g^-1*")"), ylab="Fitness (average seeds per plant)")
+ufoo <- par("usr")
+nx <- 101
+x <- seq(ufoo[1], ufoo[2], length = nx)
+xx <- as.vector(x)
+lines(x, zz)
+```
+
+#Set up Full rain(ambient) data subset for aster
+```{r}
+#SV_A is the df
+#establishing two nodes to the aster graphical model
+vars<-c("FloweringPlant","Fitness")
+
+#reshaping the data to longform
+SV_a_mod <- reshape(SV_A,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#these should be equal if the reshape is correct
+nrow(SV_a_mod)
+nrow(SV_A)*length(vars)
+
+#adding a root to the aster model
+SV_aster <- data.frame(SV_a_mod, root=1)
+
+#how many nodes you have from zero to 1, two nodes here so 0 and 1.
+pred <- c(0,1)
+
+#setting the distributions of the nodes of the model (bernoulli=1, poisson=2)
+fam<-c(1,2)
+
+#should be bernoulli and poisson
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the graphical model
+level <- gsub("[0-9]","", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+#Confirms the correct levels. Should be designated nodes
+levels(SV_aster$level) 
+
+# creating the fitness variable of interest (seed artifice, or here "fit")
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+
+#now replace values with zero for SLA and SLA_S for varb, survive to germination
+SV_aster[1:131,7]<-0
+SV_aster[1:131,8]<-0
+```
+
+#Full rain selection coefficient 
+```{r}
+w_a<-SV_A$Fitness/mean(SV_A$Fitness) 
+
+#center values on the mean
+Z1_A<-SV_A$SLA_S-mean(SV_A$SLA_S)
+
+#linear model with liner and quadratic SLA term
+bout_B <-lm(w_a ~ Z1_A + I(Z1_A^2))
+summary(bout_B)
+beta2 <-as.numeric(bout_B$coefficients[-1])
+beta2
+```
+
+#Full rain aster model
+```{r}
+#model comparison to determine significant terms
+out6_A <-aster(resp~varb, pred, fam, varb, id, root, data=SV_aster)
+out6_A2 <-aster(resp~varb+fit:SLA_S, pred, fam, varb, id, root, data=SV_aster)
+
+#model comparison using liklihood ratio test. Significantly different so keep the SLA_S
+anova(out6_A, out6_A2) 
+summary(out6_A2, info.tol = 1e-10) 
+
+mod2 <-aster(resp~varb +fit:SLA_S +fit:I(SLA_S^2), pred, fam, varb, id, root, data=SV_aster)
+summary(mod2, info.tol = 1e-11)
+
+#model comparison using liklihood ratio test to determine significance of the SLA_S^2 term. Quadratic term stays. Use model mod2
+anova(out6_A2, mod2) 
+```
+
+#Full rain selection gradient coefficient
+```{r}
+#coefficients (estimates) are the selection gradients
+pout6 <- predict(mod2)
+pout6 <- matrix(pout6, nrow = nrow(mod2$x), ncol = ncol(mod2$x))
+summary(pout6)
+colnames(pout6) <- colnames(mod2$x)
+
+#germ is used in the technical report for #fitness because fitness was determined as the number that germinated the next year. In this dataset fitness is determined by the node "Fitness".
+mufit <- pout6[, grep("Fitness", colnames(pout6))]
+
+#should equal the number of individuals you have. Mufit is the MLE of expected fitness for each individual
+length(mufit)
+
+#When mufit is divided by the mean it gives the maximum likelihood estimate (MLE) of expected relative fitness for each individual. Checking that the ordinary least squares regression of this on the traits giving the best linear approximation of the MLE of the fitness landscape is the same as the lande-arnold beta
+wmu<-mufit/mean(mufit)
+
+#now for the the coefficients from the equation with the squared term
+wmout2 <-lm(wmu~Z1_A+ I(Z1_A^2))
+summary(wmout2)
+all.equal(beta2, as.numeric((wmout2$coefficients)[-1])) 
+beta2
+wmout2$coefficients[-1]
+```
+
+#selection gradient SE using SLA_S and SLA_S^2
+```{r}
+#the following code produces the selection gradient and the SE for the selection gradient for SLA. 
+z <- cbind(Z1_A, I(Z1_A^2), deparse.level = 0)
+zvarinv <- solve(t(z) %*% z/nrow(z))
+zwcov <- t(z) %*% cbind(mufit)/nrow(z)
+all.equal(beta2, as.numeric(zvarinv %*% zwcov)/mean(mufit))
+beta2
+as.numeric(zvarinv %*% zwcov)/mean(mufit)
+
+mu <- predict(mod2)
+amat <- matrix(0, nrow = length(mufit), ncol = length(mu))
+blank <- matrix(0, nrow = nrow(pout6), ncol = ncol(pout6))
+
+#put your fitness node in for "Fitness"
+blank.idx <- grep("Fitness", colnames(pout6)) 
+ for (i in 1:nrow(amat)) {
+ boom <- blank
+ boom[i, blank.idx] <- 1
+ amat[i, ] <- as.vector(boom)
+ }
+#Coefficients are the selection gradients, which is significant in the aster model. 
+#Output will be TRUE if The lande-arnold beta and the coefficients from the aster model for the trait are equal. If they are not equal it will show by how much.
+all.equal(mufit, as.vector(amat %*% mu))
+
+bmat <- zvarinv %*% t(z) %*% amat/nrow(z)
+all.equal(beta2, as.numeric(bmat %*% mu)/mean(as.numeric(amat %*% mu)))
+
+cmat <- apply(amat,2, sum)/nrow(z) 
+cmat <- rbind(cmat)
+all.equal(beta2, as.numeric(bmat %*% mu)/as.numeric(cmat %*%mu))
+
+dmat <- rbind(bmat, cmat, deparse.level = 0)
+all.equal(beta2, as.numeric(dmat %*% mu)[1:2]/as.numeric(dmat %*%mu)[3])
+
+d3way <- array(as.vector(t(dmat)), dim = c(dim(mod2$modmat)[1:2], nrow(dmat)))
+dout <- predict(mod2, amat = d3way, se.fit = TRUE, info.tol = 1e-16)
+all.equal(beta2, dout$fit[1:2]/dout$fit[3])
+
+zeta1 <- dout$fit[1]
+zeta2 <- dout$fit[2]
+zeta3 <- dout$fit[3]
+jacobian <- rbind(c(1/zeta3,0,-zeta1/zeta3^2), c(0,1/zeta3, -zeta2/zeta3^2))
+
+dvar <- dout$gradient %*% solve(mod2$fisher) %*% t(dout$gradient)
+all.equal(dout$se.fit, sqrt(diag(dvar)))
+print(dvar)
+
+#the delta method is applied to get the asymptotic variance-covariance matrix for B. The gradient is the Jacobian Matrix needed for the delta method to transfer the values from the canonical scale to mean parameter scale
+bvar <- jacobian %*% dvar %*% t(jacobian)
+print(bvar)
+foo <- cbind(beta2, sqrt(diag(bvar)))
+colnames(foo) <- c("beta", "se(beta)")
+
+#this is the selection gradient and the standard errors.
+print(foo)
+```
+
+#Mapping the fitness landscape
+```{r}
+plot(SV_A$SLA_S, SV_A$Fitness, xlab =expression("Specific Leaf Area (cm"^2~g^-1*")"), ylab="Fitness (average seeds per plant)") 
+ufoo <- par("usr")
+nx <- 101
+x <- seq(ufoo[1], ufoo[2], length = nx)
+xx <- as.vector(x)
+
+n <- length(xx)
+newdata1 <- data.frame(varb = factor(rep("FloweringPlant", n), levels = levels(mod2$data$varb)), SLA_S = rep(0, n), resp = rep(1,n), id = 1:n)
+
+newdata2 <- data.frame(varb = factor(rep("Fitness", n), levels = levels(mod2$data$varb)), SLA_S= xx, resp = rep(1, n), id = 1:n)
+
+newdata <- rbind(newdata1, newdata2)
+newdata$fit <- ifelse(newdata$varb == "Fitness", 1, 0)
+
+pout <- predict(mod2, newdata = newdata, varvar = varb, idvar = id, root = rep(1, 2 * n))
+
+zz <- pout[newdata$varb == "Fitness"]
+zz <- matrix(zz, nx)
+lines(x, zz)
+
+plot(SV_A$SLA_cm2_g, SV_A$Fitness, xlab =expression("Specific Leaf Area (cm"^2~g^-1*")"), ylab="Fitness (average seeds per plant)") 
+
+ufoo <- par("usr")
+nx <- 101
+x <- seq(ufoo[1], ufoo[2], length = nx)
+xx <- as.vector(x)
+n <- length(xx)
+zz <- pout[newdata$varb == "Fitness"]
+zz <- matrix(zz, nx)
+lines(x, zz)
+```
+
+#Full rain analysis with two extreme SLA values removed 
+```{r}
+SV_A <- SV_A[ which(SV_A$SLA_S >1 & SV_A$SLA_S<6), ]
+```
+
+#Set up Full rain data subset for aster with extreme values removed
+```{r}
+#set up SV_A subset for aster
+vars<-c("FloweringPlant","Fitness")
+SV_a_mod <- reshape(SV_A,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#these should be equal if the reshape is correct
+nrow(SV_a_mod)
+nrow(SV_A)*length(vars)
+
+#adding a root to the aster model
+SV_aster <- data.frame(SV_a_mod, root=1)
+
+#setting the distributions of the nodes of the model (bernouli=1, poission=2)
+pred <- c(0,1)
+fam<-c(1,2)
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the graphical model
+level <- gsub("[0-9]","", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+#Confirms the correct levels
+levels(SV_aster$level) 
+
+# creating the fitness variable of interest (seed artifice, or here "fit")
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+#now replace values with zero for SLA for varb, survive to germination (this is just for my data)
+SV_aster[1:129,7]<-0
+SV_aster[1:129,8]<-0
+```
+
+#Full rain selection coefficient without extremes
+```{r}
+w_a<-SV_A$Fitness/mean(SV_A$Fitness) 
+#center values on the mean
+Z1_A<-SV_A$SLA_S-mean(SV_A$SLA_S)
+
+#linear model with quadratic term
+bout_B <-lm(w_a ~ 0+Z1_A + I(Z1_A^2))
+summary(bout_B)
+beta2 <-as.numeric(bout_B$coefficients)
+beta2
+```
+
+#Full rain aster model without extremes
+```{r}
+out6_A <-aster(resp~varb, pred, fam, varb, id, root, data=SV_aster)
+out6_A2 <-aster(resp~varb+fit:SLA_S, pred, fam, varb, id, root, data=SV_aster)
+
+#model comparison using likelihood ratio test shows SLA_S is significant
+anova(out6_A, out6_A2) 
+summary(out6_A2, info.tol = 1e-10) 
+
+mod2 <-aster(resp~varb +fit:SLA_S +fit:I(SLA_S^2), pred, fam, varb, id, root, data=SV_aster)
+summary(mod2, info.tol = 1e-11)
+
+#Model comparison using likelihood ratio test shows quadratic term is significant. Use model mod2
+anova(out6_A2, mod2) 
+```
+
+#Full rain selection gradient coefficient
+```{r}
+pout6 <- predict(mod2)
+pout6 <- matrix(pout6, nrow = nrow(mod2$x), ncol = ncol(mod2$x))
+summary(pout6)
+colnames(pout6) <- colnames(mod2$x)
+
+mufit <- pout6[, grep("Fitness", colnames(pout6))]
+
+#should equal the number of individuals you have. Mufit is the MLE of expected fitness for each individual
+length(mufit)
+wmu<-mufit/mean(mufit)
+
+#Coefficients are the selection gradients, which is significant in the aster model. 
+#Output will be TRUE if The lande-arnold beta and the coefficients from the aster model for the trait are equal. If they are not equal it will show by how much.
+#Coefficients from the equation with the squared term
+wmout2 <-lm(wmu~0+Z1_A+ I(Z1_A^2))
+summary(wmout2)
+all.equal(beta2, as.numeric((wmout2$coefficients))) 
+beta2
+wmout2$coefficients
+```
+
+#selection gradient SE using SLA_S and SLA_S^2 without extreme values
+```{r}
+#the following code produces the selection gradient and the SE for the selection gradient for SLA 
+z <- cbind(Z1_A, I(Z1_A^2), deparse.level = 0)
+zvarinv <- solve(t(z) %*% z/nrow(z))
+zwcov <- t(z) %*% cbind(mufit)/nrow(z)
+all.equal(beta2, as.numeric(zvarinv %*% zwcov)/mean(mufit))
+beta2
+as.numeric(zvarinv %*% zwcov)/mean(mufit)
+
+#this is the same calculation with predict(out6)
+mu <- predict(mod2)
+amat <- matrix(0, nrow = length(mufit), ncol = length(mu))
+blank <- matrix(0, nrow = nrow(pout6), ncol = ncol(pout6))
+
+#put your fitness node in for "Fitness"
+blank.idx <- grep("Fitness", colnames(pout6)) 
+ for (i in 1:nrow(amat)) {
+ boom <- blank
+ boom[i, blank.idx] <- 1
+ amat[i, ] <- as.vector(boom)
+ }
+
+#Coefficients are the selection gradients, which is significant in the aster model. 
+#Output will be TRUE if The lande-arnold beta and the coefficients from the aster model for the trait are equal. If they are not equal it will show by how much.
+all.equal(mufit, as.vector(amat %*% mu))
+
+bmat <- zvarinv %*% t(z) %*% amat/nrow(z)
+all.equal(beta2, as.numeric(bmat %*% mu)/mean(as.numeric(amat %*% mu)))
+
+cmat <- apply(amat,2, sum)/nrow(z) 
+cmat <- rbind(cmat)
+all.equal(beta2, as.numeric(bmat %*% mu)/as.numeric(cmat %*%mu))
+
+dmat <- rbind(bmat, cmat, deparse.level = 0)
+all.equal(beta2, as.numeric(dmat %*% mu)[1:2]/as.numeric(dmat %*%mu)[3])
+
+d3way <- array(as.vector(t(dmat)), dim = c(dim(mod2$modmat)[1:2], nrow(dmat)))
+dout <- predict(mod2, amat = d3way, se.fit = TRUE, info.tol = 1e-16)
+all.equal(beta2, dout$fit[1:2]/dout$fit[3])
+
+zeta1 <- dout$fit[1]
+zeta2 <- dout$fit[2]
+zeta3 <- dout$fit[3]
+jacobian <- rbind(c(1/zeta3,0,-zeta1/zeta3^2), c(0,1/zeta3, -zeta2/zeta3^2))
+
+dvar <- dout$gradient %*% solve(mod2$fisher) %*% t(dout$gradient)
+all.equal(dout$se.fit, sqrt(diag(dvar)))
+print(dvar)
+
+#the delta method is applied to get the asymptotic variance-covariance matrix for B. The gradient is the Jacobian Matrix needed for the delta method to transfer the values from the canonical scale to mean parameter scale
+bvar <- jacobian %*% dvar %*% t(jacobian)
+print(bvar)
+foo <- cbind(beta2, sqrt(diag(bvar)))
+colnames(foo) <- c("coefficient", "SE")
+#this is the selection gradient and the standard errors.
+print(foo)
+```

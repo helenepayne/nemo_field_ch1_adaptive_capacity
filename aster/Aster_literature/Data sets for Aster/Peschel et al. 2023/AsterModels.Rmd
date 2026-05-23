@@ -1,0 +1,3222 @@
+#MCCARTHY LAKE
+##PARENTAL YEAR 1
+```{r}
+#load libraries
+library(tidyverse)
+
+#ML_Chist has life history stages for each plant. The "total pods collected" is a sub sample of total pods. Total seeds is a count of seeds from the subsample of pods collected. 
+####Load data
+ML_Chist<-read.csv("ML_coords_lifehist.csv")
+
+#delete NAs for germination which indicate error in planting 
+ML_Chist<-ML_Chist[!is.na(ML_Chist$Germination), ]
+
+#make NAs for other life history stages zero
+ML_Chist$Surv_flwr[is.na(ML_Chist$Surv_flwr)] <- 0
+ML_Chist$total_pods_collected[is.na(ML_Chist$total_pods_collected)]<-0
+ML_Chist$total_seeds[is.na(ML_Chist$total_seeds)]<-0
+ML_Chist$total_pods[is.na(ML_Chist$total_pods)]<-0
+
+#check for nonsense data
+subset(ML_Chist, total_seeds > 0 & Germination == 0)
+subset(ML_Chist, total_seeds > 0 & Surv_flwr == 0)
+subset(ML_Chist, total_seeds > 0 & total_pods == 0)
+subset(ML_Chist, total_pods > 0 & Surv_flwr ==0)
+
+#Make  sire and dam factors
+ML_Chist$Sire <- as.factor(ML_Chist$Sire)
+ML_Chist$Dam <- as.factor(ML_Chist$Dam)
+
+#number that germinated from table 1
+ML_Chist %>%
+  mutate(germ_f = as.factor(Germination)) %>% 
+  group_by(germ_f) %>% 
+  count() 
+
+#distinct number of dams
+ML_Chist %>%
+  distinct(Dam) %>%
+  count()
+
+#distinct # sires
+ML_Chist %>%
+  distinct(Sire) %>%
+  count()
+
+#number of dams, and number of individuals for each dam
+NDS<-ML_Chist %>%
+  group_by(Dam, Sire) %>% 
+  count()
+```
+
+###Set up aster 
+```{r}
+library(aster)
+#the "vars" are the nodes in the aster graphical model.   
+vars<-c("Germination","Surv_flwr","total_pods","total_pods_collected","total_seeds")
+
+#Reshape ML_Chist to longform. "varying" notes the set of variables that will be converted to longform and named in "timevar" under one column of varb. "Times" says to use vars for the newly created column varb 
+ML18_aster <- reshape(ML_Chist,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#####Check that the reshape worked 
+#If it did the number of rows will be the same 
+nrow(ML18_aster)
+nrow(ML_Chist)*length(vars)
+
+#####Check Yloc is continuous 
+class(ML18_aster$Yloc)
+
+#####Designate fitness variable, "total_seeds", which is the final node 
+#grep1 is like a search function
+fit<-grepl("total_seeds", as.character(ML18_aster$varb))
+fit<-as.numeric(fit)
+ML18_aster$fit<-fit
+
+#####Check "total_seeds", is designated as the fitness variable 
+with(ML18_aster, sort(unique(as.character(varb)[fit==0])))
+with(ML18_aster, sort(unique(as.character(varb)[fit==1])))
+
+#####Add "root" to ML18_aster files where value is 1 
+ML18_aster <- data.frame(ML18_aster, root=1)
+
+#####Set graphical node and distribution for fitness nodes(preds) 
+names(ML18_aster)
+
+#pred is nodes. There are 5 nodes, so five preds.
+pred <- c(0,1,2,3,4)
+
+#fam assigns a distribution to each node. 1= bernoulli, 2= poission. The subsampling node (node #3 in pred) is binomial. Bernouli is a specific type of binomial so the assignment for family distribution is the same
+fam<-c(1,1,2,1,2)
+```
+
+#####check distribution
+```{r}
+library(MASS)
+#check distribution of non-Bernoulli nodes
+#Evaluate distribution of total pods
+#first subset for those that survived to flowering 
+MLyr1_flwr<-subset(ML_Chist, Surv_flwr>0)
+
+#evaluate the distribution of total_pods 
+hist(MLyr1_flwr$total_pods)
+
+#get parameters for a negative binomial distribution
+ML1.param <- fitdistr(MLyr1_flwr$total_pods, "negative binomial") 
+
+#this opens another window so you can view the histograms side by side
+windows()
+
+#get a random distribution with the parameters from you data and plot a histogram. Do that for poisson and negative bionoimal and compare against the histogram for total pods to see which fits the best 
+#negative binomial fits the total_pods distribution better than poisson. But cannot use neg. bionomial with a random effects aster model. 
+hist(rnbinom(139, size = 0.859, mu=659.432))
+hist(rpois(139, lambda=659.432))
+
+#evaluate total seeds node. Proceed as outlined above 
+#poisson is better
+MLyr1_pods<-subset(ML_Chist, total_pods_collected>0)
+hist(MLyr1_pods$total_seeds)
+ML1.param3 <- fitdistr(MLyr1_pods$total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(133, size = 2.19, mu=492.99))
+hist(rpois(133, lambda=492.99))
+```
+
+###Random effects aster model
+```{r}
+####Testing for Sire and Dam significance
+#sire is zero with dam
+MLaster_full.m1 <- reaster(resp ~ varb + fit:Yloc, list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = ML18_aster)
+summary(MLaster_full.m1, info.tol=1e-12, se.fit=TRUE)
+# Fixed Effects:
+#                            Estimate Std. Error  z value Pr(>|z|)    
+# (Intercept)              -5.534e+00  3.539e-01  -15.638  < 2e-16 ***
+# varbSurv_flwr            -6.497e+02  2.291e+00 -283.624  < 2e-16 ***
+# varbtotal_pods            1.264e+01  3.539e-01   35.716  < 2e-16 ***
+# varbtotal_pods_collected -5.434e+00  3.560e-01  -15.262  < 2e-16 ***
+# varbtotal_seeds           7.780e+00  3.539e-01   21.984  < 2e-16 ***
+# fit:Yloc                 -2.029e-05  6.982e-06   -2.906  0.00366 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#       Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.0000000         NA      NA         NA    
+# Dam  0.0021225  0.0002429   8.738     <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1                         
+
+#Sire is significant without dam
+MLaster_full.m2 <- reaster(resp ~ varb+ fit:(Yloc), list(Sire = ~ 0 + fit:Sire), pred, fam, varb, id, root, data = ML18_aster)
+summary(MLaster_full.m2)
+# Fixed Effects:
+#                            Estimate Std. Error  z value Pr(>|z|)    
+# (Intercept)              -5.534e+00  3.539e-01  -15.638  < 2e-16 ***
+# varbSurv_flwr            -6.499e+02  2.290e+00 -283.801  < 2e-16 ***
+# varbtotal_pods            1.264e+01  3.539e-01   35.717  < 2e-16 ***
+# varbtotal_pods_collected -5.434e+00  3.560e-01  -15.263  < 2e-16 ***
+# varbtotal_seeds           7.781e+00  3.539e-01   21.987  < 2e-16 ***
+# fit:Yloc                 -2.125e-05  6.781e-06   -3.134  0.00173 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#       Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.0011911  0.0002523    4.72   1.18e-06 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Dam is significant without sire 
+MLaster_mod3<-reaster(resp ~ varb+ fit:(Yloc), list(Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = ML18_aster)
+summary(MLaster_mod3)
+# Fixed Effects:
+#                            Estimate Std. Error  z value Pr(>|z|)    
+# (Intercept)              -5.534e+00  3.539e-01  -15.638  < 2e-16 ***
+# varbSurv_flwr            -6.497e+02  2.291e+00 -283.541  < 2e-16 ***
+# varbtotal_pods            1.264e+01  3.539e-01   35.715  < 2e-16 ***
+# varbtotal_pods_collected -5.434e+00  3.560e-01  -15.262  < 2e-16 ***
+# varbtotal_seeds           7.780e+00  3.539e-01   21.983  < 2e-16 ***
+# fit:Yloc                 -2.029e-05  6.982e-06   -2.906  0.00366 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Dam 0.0021225  0.0002429   8.738     <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+####Combine Sire and Dam into one random effect, "Parental"
+#the sire and dam estimates as shown from the summary output above are of similar magnitude so we can combine them into a single estimate to evaluate Va(W)
+modmat.sire <- model.matrix(~ 0 + fit:Sire, ML18_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, ML18_aster)
+modmat.siredam <- cbind(modmat.sire, modmat.dam)
+
+#random effects aster model with parental random effect and Yloc fixed effect 
+rout_ML <- reaster(resp ~ fit + varb +fit:(Yloc),list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = ML18_aster)
+summary(rout_ML)
+
+# Fixed Effects:
+#                            Estimate Std. Error  z value Pr(>|z|)    
+# (Intercept)              -5.534e+00  3.539e-01  -15.638  < 2e-16 ***
+# fit                       7.780e+00  3.539e-01   21.983  < 2e-16 ***
+# varbSurv_flwr            -6.497e+02  2.292e+00 -283.475  < 2e-16 ***
+# varbtotal_pods            1.264e+01  3.539e-01   35.715  < 2e-16 ***
+# varbtotal_pods_collected -5.434e+00  3.560e-01  -15.262  < 2e-16 ***
+# fit:Yloc                 -2.127e-05  6.976e-06   -3.049  0.00229 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#           Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.0015638  0.0002031   7.699   6.87e-15 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Model comparison to test significance of Yloc
+#Yloc is significant so it is retained in the model
+rout_ML2 <- reaster(resp ~ fit + varb, list(Parental = ~ 0 + modmat.siredam),
+    pred, fam, varb, id, root, data = ML18_aster)
+summary(rout_ML2)
+# Fixed Effects:
+#                           Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)                -5.5342     0.3539  -15.64   <2e-16 ***
+# fit                         7.7806     0.3539   21.98   <2e-16 ***
+# varbSurv_flwr            -649.7545     2.2920 -283.49   <2e-16 ***
+# varbtotal_pods             12.6401     0.3539   35.71   <2e-16 ***
+# varbtotal_pods_collected   -5.4338     0.3561  -15.26   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#           Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.0015577  0.0002039   7.639    1.1e-14 ***
+
+anova(rout_ML2, rout_ML)
+# Analysis of Deviance Table
+# 
+# Model 1: resp ~ fit + varb, ~0 + modmat.siredam
+# Model 2: resp ~ fit + varb + fit:(Yloc), ~0 + modmat.siredam
+#   Mod Df Fix Mod Df Rand Mod Dev Df Fix Df Rand Deviance   P-value
+# 1          5           1 1119897                                  
+# 2          6           1 1119907      1       0   9.9285 0.0016274
+
+####Now look at parameter estimates to be sure we have the model intended.
+sout_ML <-summary(rout_ML)
+sout_ML
+# Fixed Effects:
+#                            Estimate Std. Error  z value Pr(>|z|)    
+# (Intercept)              -5.534e+00  3.539e-01  -15.638  < 2e-16 ***
+# fit                       7.780e+00  3.539e-01   21.983  < 2e-16 ***
+# varbSurv_flwr            -6.497e+02  2.292e+00 -283.475  < 2e-16 ***
+# varbtotal_pods            1.264e+01  3.539e-01   35.715  < 2e-16 ***
+# varbtotal_pods_collected -5.434e+00  3.560e-01  -15.262  < 2e-16 ***
+# fit:Yloc                 -2.127e-05  6.976e-06   -3.049  0.00229 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#           Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.0015638  0.0002031   7.699   6.87e-15 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+```
+
+####Mapping function 
+```{r}
+#following Geyer et al. (2022)
+library(numDeriv)
+
+#this is the inverse fisher information
+fishinv<-solve(sout_ML$fisher)
+
+map.factory <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout_ML$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  modmat <- rout_ML$obj$modmat[1, , , drop = FALSE]
+  # Set Yloc = 0
+  modmat[ , , "fit:Yloc"] <- 0
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # 5 is the number of nodes 
+  # return map function
+  function (b) {
+    stopifnot(is.numeric(b))
+    stopifnot(is.finite(b))
+    stopifnot(length(b) == 1)
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE) # needed to get conditional estimates 
+
+    xi <- matrix(xi, ncol = nnode)
+    # always use drop = FALSE unless you are sure you don't want that
+    # here if we omit drop = FALSE and there is only one non-subsampling
+    # node, the code will break (apply will give an error)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod) #every individual
+    # mu is unconditional mean values for model without subsampling
+    # in this application all components mu are the same because no
+    # covariates except varb, so just return only one
+    mu[1] 
+  }
+}
+map <- map.factory(rout_ML, vars == "total_pods_collected")
+
+#MEAN FITNESS
+mf<-map(0)
+mf
+#155.0473
+
+#ADDITIVE GENETIC VARIANCE FOR FITNESS
+vaw <- rout_ML$sigma["Parental"]^2 * grad(map, 0)^2
+# get rid of name
+vaw <- as.numeric(vaw)
+vaw <- vaw * 4
+vaw
+#48757.93
+
+####FFTNS
+fftns <- vaw / mf
+fftns
+#314.4713
+
+#prediction of progeny generation mean fitness
+mf+fftns
+#469.5186
+
+# STANDARD ERRORS 
+map.factory.too <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  # modmat for one individual. Taking the first row of modmat- there is one row for each individual
+  modmat <- rout$obj$modmat[1, , , drop = FALSE] #this only takes the first row 
+  # Set Yloc = 0
+  modmat[ , , "fit:Yloc"] <- 0 #here Yloc is canceled out-> they all become zero
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added, 5 is the number of nodes 
+  # return map function
+  function (balpha) {
+    stopifnot(is.numeric(balpha))
+    stopifnot(is.finite(balpha))
+    stopifnot(length(balpha) == 1 + length(alpha))
+    b <- balpha[1]
+    alpha <- balpha[-1]
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE
+    )
+    xi <- matrix(xi, ncol = nnode)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod)
+    # mu is unconditional mean values for model without subsampling
+    # Here Yloc was set to zero so there in only one value in the Xi matrix 
+    mu[1]
+  }
+}
+
+map.too <- map.factory.too(rout_ML, vars == "total_pods_collected")
+
+#we are centering sire means on zero
+balpha.hat <- c(0, rout_ML$alpha)
+
+map.too(balpha.hat)
+
+all.equal(map(0), map.too(balpha.hat))
+
+#first and second derivatives
+g<-grad(map.too, balpha.hat)
+
+#calculates the nxn matrix
+h <- hessian(map.too, balpha.hat)
+
+#these are partial derivatives
+dmu.db <- g[1]
+dmu.dalpha <- g[-1]
+d2mu.db.dalpha <- h[1, -1]
+
+#And then we give names to the estimators in our formulas
+mu.hat <- map.too(balpha.hat)
+nu.hat <- rout_ML$nu["Parental"]
+
+#FFTNS SE
+#calculations for the gradient vector of the FFTNS prediction with respect to the parameters of the models (fixed effects and variance components) 
+dfftns <- c(- 4 * nu.hat * dmu.dalpha * dmu.db^2 / mu.hat^2 +
+8 * nu.hat * d2mu.db.dalpha / mu.hat, 4 * dmu.db^2 / mu.hat)
+
+#And apply the delta method.
+fftns.se <- t(dfftns) %*% fishinv %*% dfftns
+fftns.se <- sqrt(as.vector(fftns.se))
+fftns.se
+#108.1728
+
+#ADDITIVE GENETIC VARIANCE SE 
+#calculate the gradient vector VA(W) with respect to the parameters of the model using these formulae
+dvaw <- c(8 * nu.hat * d2mu.db.dalpha, 4 * dmu.db^2)
+
+#And then apply the delta method to get standard errors for this estimator
+vaw.se <- t(dvaw) %*% fishinv %*% dvaw
+vaw.se <- sqrt(as.vector(vaw.se))
+vaw.se
+#12666.5
+
+#MEAN FITNESS SE
+dmf <- c(dmu.dalpha, 0)
+mf.se <- t(dmf) %*% fishinv %*% dmf
+mf.se <- sqrt(as.vector(mf.se))
+mf.se
+#25.30596
+```
+
+###breeding values 
+```{r}
+#extract breeding values
+bhat <- rout_ML$b 
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+
+#check this is the correct number of sires (47)
+length(bhat.sire)
+
+#convert canonical values to mean value parameter values using mapping function. "total_pods_collected" is the subsampling node 
+map <- map.factory(rout_ML, vars == "total_pods_collected")
+vectorized.map <- Vectorize(map)
+curve(vectorized.map, from = -1 / 2, to = 1/2, xlab="b", ylab=expression(mu(b)))
+
+#breeding values for sire groups on the mean value parameter scale 
+bhat.sire.mu <- vectorized.map(bhat.sire)
+bhat.sire.mu<-as.data.frame(bhat.sire.mu)
+write.csv(bhat.sire.mu, "bhat.sire.mu.csv")
+
+#plot the distribution of breeding values
+prob_den<-density(bhat.sire.mu)
+plot(prob_den)
+```
+
+##PARENTAL YEAR TWO
+```{r}
+#load year 2 life history data for ML site
+ML_Life_hist2<-read.csv("ML_Life_hist2.csv")
+ 
+#delete NAs from germ and -99; these are positions with planting error or where the position could not be found 
+ML_Life_hist2<- ML_Life_hist2[!is.na(ML_Life_hist2$Germ), ]
+
+####make NAs for other life history stages zero
+ML_Life_hist2[is.na(ML_Life_hist2$Survive_flowering),]$Survive_flowering <- 0
+ML_Life_hist2[is.na(ML_Life_hist2$pods_collected),]$pods_collected <- 0
+ML_Life_hist2[is.na(ML_Life_hist2$Total_seeds),]$Total_seeds <- 0
+ML_Life_hist2[is.na(ML_Life_hist2$Total_pods),]$Total_pods <- 0
+
+####delete entries with -99, these are errors 
+ML_Life_hist2<-ML_Life_hist2[ML_Life_hist2$Germ!=-99,]
+ML_Life_hist2 <- subset(ML_Life_hist2, Survive_flowering != -99 | is.na(Survive_flowering))
+ML_Life_hist2<-subset(ML_Life_hist2, Total_pods!=-99 | is.na(Total_pods))
+ML_Life_hist2<-subset(ML_Life_hist2, pods_collected!=-99 | is.na(pods_collected))
+
+####check for nonsense data
+subset(ML_Life_hist2, Total_seeds > 0 & Germ == 0)
+subset(ML_Life_hist2, Total_seeds > 0 & Survive_flowering == 0)
+subset(ML_Life_hist2, Total_seeds > 0 & Total_pods == 0)
+subset(ML_Life_hist2, Total_pods > 0 & Survive_flowering ==0)
+subset(ML_Life_hist2, Total_pods > 0 & Germ ==0)
+subset(ML_Life_hist2, Survive_flowering >0 & Germ==0)
+subset(ML_Life_hist2, pods_collected > Total_pods)
+
+#changing nonsense data
+ML_Life_hist2["1203","Germ"]=1
+ML_Life_hist2["3254","Germ"]=1
+ML_Life_hist2["5050","Germ"]=1
+ML_Life_hist2["7785","Germ"]=1
+ML_Life_hist2["8063","Germ"]=1
+
+ML_Life_hist2["7785","Survive_flowering"]=1
+ML_Life_hist2["8063","Survive_flowering"]=1
+ML_Life_hist2["3831","Survive_flowering"]=1
+
+ML_Life_hist2["4597","Germ"]=1
+
+ML_Life_hist2["514","Total_pods"]=9
+ML_Life_hist2["3111","Total_pods"]=6
+
+#remove two errors: two individuals that produced pods but were not collected 
+ML_Life_hist2<-subset(ML_Life_hist2, Planting_position!='240-47.5')
+ML_Life_hist2<-subset(ML_Life_hist2, Planting_position!='116-13.2')
+
+#make factors
+ML_Life_hist2$Sire <- as.factor(ML_Life_hist2$Sire)
+ML_Life_hist2$Dam <- as.factor(ML_Life_hist2$Dam)
+ML_Life_hist2$Generation<-as.factor(ML_Life_hist2$Generation)
+```
+
+####Germination in parental vs progeny
+```{r}
+library(tidyverse)
+#data for table 1
+#number that did and did not germinate
+ML_Life_hist2 %>%
+  mutate(germ_f = as.factor(Germ)) %>% 
+  group_by(Generation, germ_f) %>% 
+  count() 
+
+#counts the number of dams in parental and progeny generation
+ML_Life_hist2 %>%
+  group_by(Generation) %>% 
+  distinct(Dam) %>%
+  arrange(Generation, Dam) %>%
+  count()
+
+#counts the number of sires in each group. For progeny number of sires is grand sires as they were open pollinated in the field 
+ML_Life_hist2 %>%
+  group_by(Generation) %>% 
+  distinct(Sire) %>%
+  count()
+
+ML_Life_hist2 %>%
+  group_by(Generation, Dam, Sire) %>% 
+  count()
+```
+
+####Seed weight
+```{r}
+#regress fitness on seed weight
+#Only the first planting position contained the weighed seed hence slice by 1 to get the planting position with .1
+library(dplyr)
+library(ggplot2)
+
+seedWgt_ML <- ML_Life_hist2 %>%
+  dplyr::select(Planting_position, Dam, Germ, Generation, seed_wgt_mg, Total_seeds) %>%
+  filter(!is.na(seed_wgt_mg)) %>%
+  group_by(Dam) %>%
+  slice(1)
+
+# t-test of seed weight between generations
+t.test(subset(seedWgt_ML, Generation == "parental")$seed_wgt_mg, subset(seedWgt_ML, Generation == "progeny")$seed_wgt_mg)
+
+# test germination
+library(car)
+ML_seedWgt_germ.glm <- glm(Germ ~ seed_wgt_mg, family = binomial, data = seedWgt_ML)
+summary(ML_seedWgt_germ.glm)
+Anova(ML_seedWgt_germ.glm)
+
+#average seed weight of progeny and parental
+seedWgt_ML%>%
+  group_by(Generation) %>%
+  summarise(Average=mean(seed_wgt_mg))
+```
+
+####check distributions
+```{r}
+ML19_aster_a<-subset(ML_Life_hist2, Generation=="parental")
+library(MASS)
+
+#total pods
+#negative binomial is better
+MLyr2_flwr<-subset(ML19_aster_a, Survive_flowering>0)
+hist(MLyr2_flwr$Total_pods)
+
+ML2.param <- fitdistr(MLyr2_flwr$Total_pods, "negative binomial") 
+windows()
+hist(rnbinom(162, size =1.53, mu=12.64))
+hist(rpois(162, lambda=12.64))
+
+#total seeds 
+#negative binomial is better
+MLyr2_pods<-subset(ML19_aster_a, pods_collected>0)
+hist(MLyr2_pods$Total_seeds)
+ML2.param3 <- fitdistr(MLyr2_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(154, size = 1.8, mu=45.5))
+hist(rpois(154, lambda=45.5))
+```
+
+###Set up aster
+```{r}
+ML19_aster_a<-subset(ML_Life_hist2, Generation=="parental")
+
+#set the nodes for the aster graphical model as "vars". "Pods_collected" is the sub sampled node 
+vars<-c("Germ","Survive_flowering","Total_pods","pods_collected","Total_seeds")
+
+#reshape ML19_aster_a to longform
+ML19_aster <- reshape(ML19_aster_a,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#Check that the reshape worked 
+nrow(ML19_aster)
+nrow(ML19_aster_a)*length(vars)
+
+#fixed effect y location should be continuous i.e., integers
+class(ML19_aster$yloc)
+
+#designate fitness variable as terminal node, "Total_seeds"
+fit<-grepl("Total_seeds", as.character(ML19_aster$varb))
+fit<-as.numeric(fit)
+ML19_aster$fit<-fit
+
+#check that "total_seeds" is designated as the fitness variable
+with(ML19_aster, sort(unique(as.character(varb)[fit==0])))
+with(ML19_aster, sort(unique(as.character(varb)[fit==1])))
+
+#Add a variable "root" to ML19_aster where value is 1
+ML19_aster <- data.frame(ML19_aster, root=1)
+
+#give each node a number
+pred <- c(0,1,2,3,4)
+
+#designate each node with a distribution. 1= Bernoulli, 2= poisson. sub sampling node (pods_collected) is binomial(Bernoulli is a type of binomial distribution so the family assignment is the same)
+fam<-c(1,1,2,1,2)
+```
+
+###Random effects aster model
+```{r}
+library(aster)
+####Fit random effects model. sire estimate is zero with dam  
+both_ML19<- reaster(resp ~ varb + fit:yloc, random = list(Sire = ~0 + 
+    fit:Sire, Dam = ~0 + fit:Dam), pred = pred, fam = fam, varvar = varb, 
+    idvar = id, root = root, data = ML19_aster)
+summary(both_ML19)
+# Call:
+# reaster.formula(fixed = resp ~ varb + fit:yloc, random = list(Sire = ~0 + 
+#     fit:Sire, Dam = ~0 + fit:Dam), pred = pred, fam = fam, varvar = varb, 
+#     idvar = id, root = root, data = ML19_aster)
+# 
+# 
+# Fixed Effects:
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -5.093e+00  2.891e-01 -17.616  < 2e-16 ***
+# varbpods_collected    -4.422e+00  3.157e-01 -14.004  < 2e-16 ***
+# varbSurvive_flowering -3.749e+00  6.464e-01  -5.800 6.63e-09 ***
+# varbTotal_pods         7.899e+00  2.904e-01  27.201  < 2e-16 ***
+# varbTotal_seeds        7.375e+00  2.894e-01  25.485  < 2e-16 ***
+# fit:yloc              -1.175e-04  6.281e-05  -1.872   0.0613 .  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.000000         NA      NA         NA    
+# Dam  0.017380   0.002172   8.003   6.08e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Check for the effect of sire alone. Significant. 
+sire_ML19<- reaster(resp ~ varb + fit:yloc, random = list(Sire = ~0 + 
+    fit:Sire), pred = pred, fam = fam, varvar = varb, 
+    idvar = id, root = root, data = ML19_aster)
+summary(sire_ML19)
+# Call:
+# reaster.formula(fixed = resp ~ varb + fit:yloc, random = list(Sire = ~0 + 
+#     fit:Sire), pred = pred, fam = fam, varvar = varb, idvar = id, 
+#     root = root, data = ML19_aster)
+# 
+# 
+# Fixed Effects:
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -5.093e+00  2.891e-01 -17.616  < 2e-16 ***
+# varbpods_collected    -4.428e+00  3.158e-01 -14.025  < 2e-16 ***
+# varbSurvive_flowering -3.840e+00  6.464e-01  -5.941 2.84e-09 ***
+# varbTotal_pods         7.899e+00  2.904e-01  27.201  < 2e-16 ***
+# varbTotal_seeds        7.379e+00  2.894e-01  25.500  < 2e-16 ***
+# fit:yloc              -1.485e-04  6.053e-05  -2.454   0.0141 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.012511   0.002304   5.431   2.81e-08 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#check for the effect of dam alone. significant  
+dam_ML19<- reaster(resp ~ varb + fit:yloc, random = list(Dam = ~0 + 
+    fit:Sire), pred = pred, fam = fam, varvar = varb, 
+    idvar = id, root = root, data = ML19_aster)
+summary(dam_ML19)
+# Call:
+# reaster.formula(fixed = resp ~ varb + fit:yloc, random = list(Dam = ~0 + 
+#     fit:Sire), pred = pred, fam = fam, varvar = varb, idvar = id, 
+#     root = root, data = ML19_aster)
+# 
+# 
+# Fixed Effects:
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -5.093e+00  2.891e-01 -17.616  < 2e-16 ***
+# varbpods_collected    -4.428e+00  3.158e-01 -14.025  < 2e-16 ***
+# varbSurvive_flowering -3.840e+00  6.464e-01  -5.941 2.84e-09 ***
+# varbTotal_pods         7.899e+00  2.904e-01  27.201  < 2e-16 ***
+# varbTotal_seeds        7.379e+00  2.894e-01  25.500  < 2e-16 ***
+# fit:yloc              -1.485e-04  6.053e-05  -2.454   0.0141 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#     Estimate Std. Error z value Pr(>|z|)/2    
+# Dam 0.012511   0.002304   5.431   2.81e-08 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+####Combine Sire and Dam into one random effect, `Parental`. The estimates are of similar magnitude 
+modmat.sire <- model.matrix(~ 0 + fit:Sire, ML19_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, ML19_aster)
+modmat.siredam <- cbind(modmat.sire,modmat.dam)
+
+
+rout_ML19 <- reaster(resp ~ fit + varb +fit:(yloc), list(Parental = ~ 0 + modmat.siredam),pred, fam, varb, id, root, data = ML19_aster)
+sout_ML19 <-summary(rout_ML19)
+sout_ML19
+save(rout_ML19, file = "rout_ML19.rdata")
+# Fixed Effects:
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -5.093e+00  2.891e-01 -17.616  < 2e-16 ***
+# fit                    7.375e+00  2.894e-01  25.487  < 2e-16 ***
+# varbpods_collected    -4.423e+00  3.157e-01 -14.007  < 2e-16 ***
+# varbSurvive_flowering -3.762e+00  6.464e-01  -5.820  5.9e-09 ***
+# varbTotal_pods         7.899e+00  2.904e-01  27.201  < 2e-16 ***
+# fit:yloc              -1.256e-04  6.272e-05  -2.003   0.0452 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.012437   0.001726   7.207   2.85e-13 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#model comparison for significance of yloc. Significant.
+rout_ML192 <- reaster(resp ~ fit + varb, list(Parental = ~ 0 + modmat.siredam),
+    pred, fam, varb, id, root, data = ML19_aster)
+sout_ML192 <-summary(rout_ML192)
+sout_ML192
+# Fixed Effects:
+#                       Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)            -5.0932     0.2891 -17.616  < 2e-16 ***
+# fit                     7.3759     0.2894  25.488  < 2e-16 ***
+# varbpods_collected     -4.4234     0.3157 -14.009  < 2e-16 ***
+# varbSurvive_flowering  -3.7716     0.6464  -5.834  5.4e-09 ***
+# varbTotal_pods          7.8992     0.2904  27.201  < 2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.012504   0.001723   7.257   1.99e-13 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+anova(rout_ML192, rout_ML19)
+# Model 1: resp ~ fit + varb, ~0 + modmat.siredam
+# Model 2: resp ~ fit + varb + fit:(yloc), ~0 + modmat.siredam
+#   Mod Df Fix Mod Df Rand Mod Dev Df Fix Df Rand Deviance  P-value
+# 1          5           1   20266                                 
+# 2          6           1   20270      1       0   4.0883 0.043182
+
+```
+
+###Mapping function 
+```{r}
+#following Geyer et al. 2022
+library(numDeriv)
+fishinv<-solve(sout_ML19$fisher)
+map.factory <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  modmat <- rout$obj$modmat[1, , , drop = FALSE]
+  # Set Yloc = 0
+  modmat[ , , "fit:yloc"] <- 0
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added, 5 is the number of nodes 
+  # return map function
+  function (b) {
+    stopifnot(is.numeric(b))
+    stopifnot(is.finite(b))
+    stopifnot(length(b) == 1)
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE)
+  
+    xi <- matrix(xi, ncol = nnode)
+    # always use drop = FALSE unless you are sure you don't want that
+    # here if we omit drop = FALSE and there is only one non-subsampling
+    # node, the code will break (apply will give an error)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod) #every individual
+    # mu is unconditional mean values for model without subsampling
+    # in this application all components mu are the same because no
+    # covariates except varb, so just return only one
+    mu[1] 
+  }
+}
+
+map <- map.factory(rout_ML19, vars == "pods_collected")
+
+#MEAN FITNESS
+mf<-map(0)
+mf
+# 4.116118
+
+#VA(W)
+vaw <- rout_ML19$sigma["Parental"]^2 * grad(map, 0)^2
+# get rid of name
+vaw <- as.numeric(vaw)
+vaw <- vaw * 4
+vaw
+#18.80093
+
+####FFTNS
+fftns <- vaw / mf
+fftns
+#4.567638
+
+# get SE
+map.factory.too <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  # modmat for one individual. Taking the first row of modmat- there is one row for each individual
+  modmat <- rout$obj$modmat[1, , , drop = FALSE] #this only takes the first row 
+  # Set Yloc = 0
+  modmat[ , , "fit:yloc"] <- 0 #here Yloc is canceled out-> they all become zero
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added, second number is number of nodes 
+  # return map function
+  function (balpha) {
+    stopifnot(is.numeric(balpha))
+    stopifnot(is.finite(balpha))
+    stopifnot(length(balpha) == 1 + length(alpha))
+    b <- balpha[1]
+    alpha <- balpha[-1]
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE
+    )
+    xi <- matrix(xi, ncol = nnode)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod)
+    # mu is unconditional mean values for model without subsampling
+    # Here Yloc was set to zero so there in only one value in the Xi matrix 
+    mu[1]
+  }
+}
+
+map.too <- map.factory.too(rout_ML19, vars == "pods_collected")
+
+#centering sire on zero
+balpha.hat <- c(0, rout_ML19$alpha)
+
+map.too(balpha.hat)
+#4.116118
+
+all.equal(map(0), map.too(balpha.hat))
+
+#first and second derivatives
+g<-grad(map.too, balpha.hat)
+
+#calculates the nxn matrix
+h <- hessian(map.too, balpha.hat)
+
+#these are partial derivatives
+dmu.db <- g[1]
+dmu.dalpha <- g[-1]
+d2mu.db.dalpha <- h[1, -1]
+
+# give names to the estimators in our formulas
+mu.hat <- map.too(balpha.hat)
+nu.hat <- rout_ML19$nu["Parental"]
+
+#FFTNS SE
+#calculations for the gradient vector of the FFTNS prediction with respect to the parameters of the models (fixed effects and variance components) 
+#zero removed
+dfftns <- c(- 4 * nu.hat * dmu.dalpha * dmu.db^2 / mu.hat^2 +
+8 * nu.hat * d2mu.db.dalpha / mu.hat, 4 * dmu.db^2 / mu.hat)
+
+#And apply the delta method.
+fftns.se <- t(dfftns) %*% fishinv %*% dfftns
+fftns.se <- sqrt(as.vector(fftns.se))
+fftns.se
+#2.746517
+
+#ADDITIVE GENETIC VARIANCE SE 
+#calculate the gradient vector VA(W) with respect to the parameters of the model using these formulae
+dvaw <- c(8 * nu.hat * d2mu.db.dalpha, 4 * dmu.db^2)
+
+#And then apply the delta method to get standard errors for this estimator
+vaw.se <- t(dvaw) %*% fishinv %*% dvaw
+vaw.se <- sqrt(as.vector(vaw.se))
+vaw.se
+#10.7141
+
+#MEAN FITNESS SE
+dmf <- c(dmu.dalpha, 0)
+mf.se <- t(dmf) %*% fishinv %*% dmf
+mf.se <- sqrt(as.vector(mf.se))
+mf.se
+#0.5347174
+```
+
+###breeding values
+```{r}
+bhat <- rout_ML19$b 
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+
+#check this is the correct number of sires (47)
+length(bhat.sire)
+
+#convert canonical values to mean value parameter values using mapping function
+map <- map.factory(rout_ML19, vars == "total_pods_collected")
+vectorized.map <- Vectorize(map)
+
+#breeding values for sire groups on the mean value parameter scale 
+bhat.sire.mu <- vectorized.map(bhat.sire)
+bhat.sire.mu<-as.data.frame(bhat.sire.mu)
+write.csv(bhat.sire.mu, "bhat.sire.mu.csv")
+```
+
+##PROGENY YEAR 2
+```{r}
+#subset the dataframe for the progeny generation
+ML_Life_hist2$Generation<-as.factor(ML_Life_hist2$Generation)
+ML19_aster_b<-subset(ML_Life_hist2, Generation=="progeny")
+ML19_aster_b<-droplevels(ML19_aster_b)
+levels(ML19_aster_b$Generation)
+```
+
+###check distributions
+```{r}
+library(MASS)
+#total pods
+#negative binomial
+MLyr2_prog_flwr<-subset(ML19_aster_b, Survive_flowering>0)
+hist(MLyr2_prog_flwr$Total_pods)
+
+ML2.prog.param <- fitdistr(MLyr2_prog_flwr$Total_pods, "negative binomial") 
+windows()
+hist(rnbinom(138, size =1.23, mu=11.8))
+hist(rpois(138, lambda=11.8))
+alpha.mlyr2<-round(ML2.prog.param$estimate[1],2)
+
+#total seeds 
+#negative binomial
+MLyr2_prog_pods<-subset(ML19_aster_b, pods_collected>0)
+hist(MLyr2_prog_pods$Total_seeds)
+ML2.prog.param3 <- fitdistr(MLyr2_prog_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(130, size =1.5 , mu=44.6))
+hist(rpois(130, lambda=44.6))
+alpha.mlyr2.3<-round(ML2.prog.param3$estimate[1],2)
+```
+
+###Set up aster
+```{r}
+#establish nodes as vars. "pods_collected" is the subsampled node
+vars<-c("Germ","Survive_flowering","Total_pods","pods_collected","Total_seeds")
+
+#reshape ML19_aster_b to long form
+ML19_aster_prog <- reshape(ML19_aster_b,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#Check that the reshape worked 
+nrow(ML19_aster_prog)
+nrow(ML19_aster_b)*length(vars)
+
+#designate fitness node, "Total_seeds"
+fit<-grepl("Total_seeds", as.character(ML19_aster_prog$varb))
+fit<-as.numeric(fit)
+ML19_aster_prog$fit<-fit
+
+#check "Total_seeds" is designated as the fitness variable 
+with(ML19_aster_prog, sort(unique(as.character(varb)[fit==0])))
+with(ML19_aster_prog, sort(unique(as.character(varb)[fit==1])))
+
+#Add a variable "root" to ML19_aster files where value is 1
+ML19_aster_prog <- data.frame(ML19_aster_prog, root=1)
+
+#fixed effect yloc should be an integer
+class(ML19_aster_prog$yloc)
+
+#give each node a number
+pred <- c(0,1,2,3,4)
+
+#designate each node with a distribution. 1= Bernoulli, 2= poisson, subsampling node (pods_collected) is binomial which is the same family as Bernoulli
+fam<-c(1,1,2,1,2)
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-data.frame(pvars, vars, sapply(fam.default(), as.character)[fam])
+colnames(bar) <- c("pred", "succ", "fam")
+print(bar, right = FALSE, row.names = FALSE)
+```
+
+###fixed effect aster model
+```{r}
+seeds.out_ML19_prog <- aster(resp ~ varb+ fit:(yloc), pred, fam, varb, id, root, data = ML19_aster_prog) 
+
+summary(seeds.out_ML19_prog, info.tol = 1e-9, se.fit=TRUE)
+#summary with poisson node 
+# #
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -4.661e+00  2.363e-01 -19.726  < 2e-16 ***
+# varbpods_collected    -4.900e+00  2.751e-01 -17.815  < 2e-16 ***
+# varbSurvive_flowering -4.086e+00  5.614e-01  -7.278  3.4e-13 ***
+# varbTotal_pods         7.380e+00  2.383e-01  30.974  < 2e-16 ***
+# varbTotal_seeds        6.960e+00  2.366e-01  29.414  < 2e-16 ***
+# fit:yloc              -1.379e-04  6.359e-05  -2.169   0.0301 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1# get hypothetical individual
+
+ML_19_hyp <- subset(ML19_aster_prog, id == 1)
+# set yloc to 0
+ML_19_hyp$yloc <- 0
+# set resp to 1
+ML_19_hyp$resp <- 1
+
+# predict conditional fitness estimates for this hypothetical individual
+ML_19_hyp.p <- predict(seeds.out_ML19_prog, varvar = varb, idvar = id, root = root,
+  newdata = ML_19_hyp, model.type = "conditional")
+
+# take the product of these conditional estimates, EXCEPT for the sub sampling node (4th node)
+mu.fit<-prod(ML_19_hyp.p[-4])
+mu.fit
+#4.101024
+```
+
+####mean fitness with negative binomial distributions
+```{r}
+#change the terminal node to negative binomial in the aster set up 
+pred <- c(0,1,2,3,4)
+
+#designate each node with a distribution
+fam<-c(1,1,2,1,3)
+
+famlist <- list(fam.bernoulli(),fam.negative.binomial(size = alpha.mlyr2), fam.negative.binomial(size = alpha.mlyr2.3))
+sapply(famlist, as.character)[fam] 
+famlist
+
+seeds.out_ML19_prog <- aster(resp ~ varb+ fit:(yloc), pred, fam, famlist=famlist, varb, id, root, data = ML19_aster_prog) 
+summary(seeds.out_ML19_prog, se.fit=T, info.tol=1e-9)
+# aster.formula(formula = resp ~ varb + fit:(yloc), pred = pred, 
+#     fam = fam, varvar = varb, idvar = id, root = root, data = ML19_aster_prog, 
+#     famlist = famlist)
+# 
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -4.661e+00  2.363e-01 -19.726  < 2e-16 ***
+# varbpods_collected     1.708e+00  2.465e-01   6.932 4.16e-12 ***
+# varbSurvive_flowering  4.367e+00  4.876e-01   8.955  < 2e-16 ***
+# varbTotal_pods         5.813e+00  2.371e-01  24.517  < 2e-16 ***
+# varbTotal_seeds        5.520e+00  2.363e-01  23.360  < 2e-16 ***
+# fit:yloc              -7.675e-05  4.740e-05  -1.619    0.105    
+
+ML_19_hyp <- subset(ML19_aster_prog, id == 1)
+# set yloc to 0
+ML_19_hyp$yloc <- 0
+# set resp to 1
+ML_19_hyp$resp <- 1
+
+# predict conditional fitness estimates for this hypothetical individual
+ML_19_hyp.p <- predict(seeds.out_ML19_prog, varvar = varb, famlist=famlist,idvar = id, root = root,
+  newdata = ML_19_hyp, model.type = "conditional")
+
+# take the product of these conditional estimates, EXCEPT for the subsampling node (4th node)
+mu.fit<-prod(ML_19_hyp.p[-4])
+mu.fit
+#the estimate is not that different from the model with a poisson node 
+#4.071212
+```
+
+###estimate mean fitness and se 
+```{r}
+##This is using code from the switch-too-MR technical report 
+#use poisson nodes 
+#use the estimates from the hypothetical data frame where you set yloc to zero
+
+#conditional
+nnode <- length(vars)
+nind <- length(unique(ML_19_hyp$id))
+nnode * nind == nrow(ML_19_hyp)
+
+pout.cond <- predict(seeds.out_ML19_prog, newdata = ML_19_hyp, varvar = varb, idvar = id, root = root, model.type = "conditional", is.always.parameter = TRUE, gradient= TRUE)
+xi<-pout.cond$fit
+
+class(xi)
+length(xi)==nind*nnode
+
+xi <- matrix(xi, nrow = nind)
+colnames(xi) <- vars
+xi
+
+#unconditional
+pout.unco<-predict(seeds.out_ML19_prog, newdata = ML_19_hyp, varvar = varb, idvar = id, root = root, gradient=TRUE)
+mu<-pout.unco$fit
+mu <- matrix(mu, nrow = nind)
+colnames(mu) <- vars
+mu
+
+is.seeds<-grep("Total_seeds", vars)
+is.pods<-grep("Total_pods", vars)
+
+is.seeds
+is.pods
+
+#unconditional estimate of total pods 
+mu.pods<-mu[, is.pods]
+
+#conditional estimate of total seeds 
+xi.seeds <- xi[ , is.seeds]
+
+mu.seeds <- mu.pods * xi.seeds
+mu.seeds
+# Total_pods 
+#   4.101024
+
+#make a  function
+foo <- function(x) {
+# x is xi and mu strung out as one vector
+xi <- x[1:length(xi)]
+mu <- x[- (1:length(xi))]
+xi <- matrix(xi, nrow = nind)
+mu <- matrix(mu, nrow = nind)
+mu.pods <- mu[ , is.pods]
+xi.seeds <- xi[ , is.seeds]
+mu.seeds <- mu.pods * xi.seeds
+}
+
+#vector of conditional and unconditional estimates for each node 
+ximu <- c(xi, mu)
+all.equal(foo(ximu), mu.seeds)
+
+foo(ximu)
+mu.seeds
+
+library(numDeriv)
+# R package numDeriv figures out the Jacobian matrix for this transformation.
+#We also need the Jacobian matrix for the transformation from the “coefficients” vector to the vector ximu
+
+jac.foo <- jacobian(foo, ximu)
+jac.ximu <- rbind(pout.cond$gradient, pout.unco$gradient)
+jac.total <- jac.foo %*% jac.ximu
+#Now the delta method says the variance-covariance matrix of all the fitnesses (the vector estimate mu.fit) is JI−1JT, where J is the overall Jacobian matrix jar.total and I is Fisher information for the “coefficients” vector
+#there are six coefficients from the model
+V <- jac.total %*% solve(seeds.out_ML19_prog$fisher) %*% t(jac.total)
+#and the standard errors are square roots of the variances (the diagonal elements of V)
+se <- sqrt(diag(V))
+bar.pois <- cbind(mu.fit, se)
+colnames(bar.pois) <- c("Estimate", "SE")
+bar.pois
+# Estimate SE
+# 4.101024 0.3631521
+```
+
+#LAKE BELLA
+##PARENTAL YEAR 1 
+```{r}
+library(tidyverse)
+###Load lifehistory data
+LB_Life_hist<-read.csv("LB_Life_hist.csv")
+
+#####Delete NAs in germ and make other NAs zero. These are individuals where there was a planting error or the planting position could not be found
+LB_Life_hist<-LB_Life_hist[!is.na(LB_Life_hist$Germination), ]
+
+LB_Life_hist[is.na(LB_Life_hist$Surv_Flwr),]$Surv_Flwr<- 0
+LB_Life_hist[is.na(LB_Life_hist$Total_pods),]$Total_pods<- 0
+LB_Life_hist[is.na(LB_Life_hist$Total_pods_collected),]$Total_pods_collected<- 0
+LB_Life_hist[is.na(LB_Life_hist$Seeds),]$Seeds<- 0
+
+####check for nonsense data
+subset(LB_Life_hist, Seeds > 0 & Germination == 0)
+subset(LB_Life_hist, Seeds > 0 & Surv_Flwr == 0)
+subset(LB_Life_hist, Surv_Flwr >0 & Germination==0)
+subset(LB_Life_hist, Seeds > 0 & Total_pods == 0)
+subset(LB_Life_hist, Total_pods > 0 & Surv_Flwr ==0)
+subset(LB_Life_hist, Total_pods > 0 & Germination ==0)
+subset(LB_Life_hist, Seeds > 0 & Germination ==0)
+
+#fix nonsense data
+LB_Life_hist["2639", "Germination"]=1
+LB_Life_hist["3924", "Germination"]=1
+LB_Life_hist["236", "Surv_Flwr"]=1
+LB_Life_hist["609", "Surv_Flwr"]=1
+LB_Life_hist["1379", "Surv_Flwr"]=1
+LB_Life_hist["3924", "Surv_Flwr"]=1
+LB_Life_hist["2660", "Surv_Flwr"]=1
+
+#Make sire and dam factors 
+LB_Life_hist$Dam<-as.factor(LB_Life_hist$Dam)
+LB_Life_hist$Sire<-as.factor(LB_Life_hist$Sire)
+
+#make table summarizing germination for parental generation
+LB_Life_hist %>%
+  mutate(germ_f = as.factor(Germination)) %>%
+  group_by(germ_f) %>% 
+  count() 
+
+#number of distinct dams 
+LB_Life_hist %>%
+  distinct(Dam) %>%
+  count()
+
+#number of distinct sires
+LB_Life_hist %>%
+  distinct(Sire) %>%
+  count()
+```
+
+####check distribution
+```{r}
+LB1flwr<-subset(LB_Life_hist, Surv_Flwr>0)
+#seeds
+#negative binomial  
+hist(LB1flwr$Seeds)
+LB1.param <- fitdistr(LB1flwr$Seeds, "negative binomial") 
+windows()
+hist(rnbinom(21, size = 0.196, mu=15.71))
+hist(rpois(21, lambda=15.71))
+```
+
+###Set up aster
+```{r}
+#Set up nodes as vars
+vars<-c("Germination","Surv_Flwr", "Seeds")
+
+#reshape LB_Life_hist to longform
+LB18_aster <- reshape(LB_Life_hist,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+####checking that the reshape worked. These should be the same length 
+nrow(LB18_aster)
+nrow(LB_Life_hist)*length(vars)
+
+####Check fixed effect Yloc is continuous
+class(LB18_aster$Yloc)
+
+####Designate fitness variable, "Seeds"
+fit<-grepl("Seeds", as.character(LB18_aster$varb))
+fit<-as.numeric(fit)
+LB18_aster$fit<-fit
+
+####Check Seeds is designated as the fitness variable
+with(LB18_aster, sort(unique(as.character(varb)[fit==0])))
+with(LB18_aster, sort(unique(as.character(varb)[fit==1])))
+
+####Add a variable "root" to files whose value is 1
+LB18_aster <- data.frame(LB18_aster, root=1)
+
+####Set graphical node and dist. for fintess nodes (preds)
+#Each node in the graphical model is given a number (pred) and a distribution (fam). 1=Bernoulli, 2=poisson
+#there is no subsampling for this model because it was possible to collect all seeds 
+pred <- c(0,1,2)
+fam<-c(1,1,2)
+```
+
+###Random effect aster model
+```{r}
+#check for significance of dam and sire 
+#dam is significant, Sire is NA
+LBaster_full.m1 <- reaster(resp ~ varb+ fit:(Yloc), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = LB18_aster)
+summary(LBaster_full.m1)
+# Fixed Effects:
+#                 Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)    -3.811724   0.148255 -25.711  < 2e-16 ***
+# varbSeeds       6.457522   0.161438  40.000  < 2e-16 ***
+# varbSurv_Flwr -10.619939   0.941078 -11.285  < 2e-16 ***
+# fit:Yloc        0.001570   0.000562   2.793  0.00522 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire   0.0000         NA      NA         NA    
+# Dam    0.0933     0.0149   6.263   1.89e-10 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#sire is significant. The estimate is 0.07157
+LBaster_full.m2 <- reaster(resp ~ varb+ fit:Yloc, list(Sire = ~ 0 + fit:Sire), pred, fam, varb, id, root, data = LB18_aster)
+summary(LBaster_full.m2)
+# Fixed Effects:
+#                 Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)   -3.812e+00  1.483e-01 -25.711  < 2e-16 ***
+# varbSeeds      6.489e+00  1.610e-01  40.312  < 2e-16 ***
+# varbSurv_Flwr -1.098e+01  9.424e-01 -11.653  < 2e-16 ***
+# fit:Yloc       1.851e-03  5.597e-04   3.308  0.00094 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire  0.07157    0.01695   4.221   1.22e-05 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Dam is significant and the estimate is 0.0933
+LBaster_full.m3 <- reaster(resp ~ varb+ fit:Yloc, list(Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = LB18_aster)
+summary(LBaster_full.m3)
+# Fixed Effects:
+#                 Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)    -3.811724   0.148255 -25.711  < 2e-16 ***
+# varbSeeds       6.457522   0.161438  40.000  < 2e-16 ***
+# varbSurv_Flwr -10.619939   0.941078 -11.285  < 2e-16 ***
+# fit:Yloc        0.001570   0.000562   2.793  0.00522 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#     Estimate Std. Error z value Pr(>|z|)/2    
+# Dam   0.0933     0.0149   6.263   1.89e-10 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#combine sire and dam into parental 
+modmat.sire <- model.matrix(~ 0 + fit:Sire, LB18_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, LB18_aster)
+modmat.siredam <- cbind(modmat.sire,modmat.dam)
+
+#check for significance of yloc
+rout_LB<- reaster(resp ~ fit+varb+ fit:(Yloc), list(Parental = ~ 0 + fit:modmat.siredam), pred, fam, varb, id, root, data = LB18_aster)
+sout_LB<-summary(rout_LB)
+sout_LB
+
+# Fixed Effects:
+#                 Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)   -3.812e+00  1.483e-01 -25.711  < 2e-16 ***
+# fit            6.462e+00  1.616e-01  39.980  < 2e-16 ***
+# varbSurv_Flwr -1.068e+01  9.422e-01 -11.340  < 2e-16 ***
+# fit:Yloc       1.602e-03  5.635e-04   2.843  0.00446 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental  0.06630    0.01133   5.852   2.43e-09 ***
+
+rout_LB2<- reaster(resp ~ fit+varb, list(Parental = ~ 0 + fit:modmat.siredam), pred, fam, varb, id, root, data = LB18_aster)
+summary(rout_LB2)
+# Fixed Effects:
+#               Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)    -3.8117     0.1483  -25.71   <2e-16 ***
+# fit             6.4791     0.1613   40.17   <2e-16 ***
+# varbSurv_Flwr -10.8812     0.9432  -11.54   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental  0.07110    0.01118   6.359   1.02e-10 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+anova(rout_LB2, rout_LB)
+# Model 1: resp ~ fit + varb, ~0 + fit:modmat.siredam
+# Model 2: resp ~ fit + varb + fit:(Yloc), ~0 + fit:modmat.siredam
+#   Mod Df Fix Mod Df Rand Mod Dev Df Fix Df Rand Deviance   P-value
+# 1          3           1  414.48                                  
+# 2          4           1  424.22      1       0   9.7373 0.0018057
+```
+
+###Mapping function 
+```{r}
+#following Geyer et al. 2022
+map.factory <- function(rout) {
+  stopifnot(inherits(rout, "reaster"))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  modmat <- rout$obj$modmat[1, , , drop = FALSE]
+  # Set Yloc = 0
+  modmat[ , , "fit:Yloc"] <- 0
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:3)] # added second value is number of nodes
+  # return map function
+  function (b) {
+    stopifnot(is.numeric(b))
+    stopifnot(is.finite(b))
+    stopifnot(length(b) == 1)
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE)
+  
+    xi <- matrix(xi, ncol = nnode)
+    # always use drop = FALSE unless you are sure you don't want that
+    # we omit drop = FALSE because we do not have subsampling
+    mu <- apply(xi, 1, prod) #every individual
+    # mu is unconditional mean values for model without subsampling
+    # in this application all components mu are the same because no
+    # covariates except varb, so just return only one
+    mu[1] 
+  }
+}
+
+map <- map.factory(rout_LB)
+
+#extract breeding values
+class(rout_LB$obj) 
+bhat <- rout_LB$b 
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+#check the length matches the unique number of sires
+length(bhat.sire)
+#convert sire means from the canonical to mean value parameter scale
+vectorized.map <- Vectorize(map)
+bhat.sire.mu <- vectorized.map(bhat.sire)
+bhat.sire.mu<-as.data.frame(bhat.sire.mu)
+write.csv(bhat.sire.mu, "bhat.sire.mu.csv")
+
+#mean fitness
+map <- map.factory(rout_LB)
+mf<-map(0)
+mf
+#0.04043526
+
+#additive genetic variance for fitness
+vaw <- rout_LB$sigma["Parental"]^2 * grad(map, 0)^2
+# get rid of name
+vaw <- as.numeric(vaw)
+vaw <- vaw * 4
+vaw
+#0.006568377
+
+####FFTNS
+fftns <- vaw / mf
+fftns
+#0.1624418
+
+#predicted progeny mean fitness
+ppf<-fftns+mf
+ppf
+#0.2028771
+
+fishinv<-solve(sout_LB$fisher)
+
+#Extract SE 
+map.factory.too <- function(rout) {
+  stopifnot(inherits(rout, "reaster"))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  # modmat for one individual. Taking the first row of modmat- there is one row for each individual
+  modmat <- rout$obj$modmat[1, , , drop = FALSE] #this only takes the first row 
+  # Set Yloc = 0
+  modmat[ , , "fit:Yloc"] <- 0 #here Yloc becomes zero
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:3)] # added 3 which is the number of nodes 
+  # return map function
+  function (balpha) {
+    stopifnot(is.numeric(balpha))
+    stopifnot(is.finite(balpha))
+    stopifnot(length(balpha) == 1 + length(alpha))
+    b <- balpha[1]
+    alpha <- balpha[-1]
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE
+    )
+    xi <- matrix(xi, ncol = nnode)
+    mu <- apply(xi, 1, prod)
+    # mu is unconditional mean values for model without subsampling
+    # Here Yloc was set to zero so there in only one value in the Xi matrix 
+    mu[1]
+  }
+}
+
+map.too <- map.factory.too(rout_LB)
+
+balpha.hat <- c(0, rout_LB$alpha)
+
+map.too(balpha.hat)
+#0.04043526
+
+all.equal(map(0), map.too(balpha.hat))
+library(numDeriv)
+
+#FTNS SE
+#first and second derivatives
+g<-grad(map.too, balpha.hat)
+h <- hessian(map.too, balpha.hat)
+
+#these are partial derivatives
+dmu.db <- g[1]
+dmu.dalpha <- g[-1]
+d2mu.db.dalpha <- h[1, -1]
+
+#give names to the estimators in our formulas
+mu.hat <- map.too(balpha.hat)
+nu.hat <- rout_LB$nu["Parental"]
+
+#calculations for the gradient vector of the FTNS prediction with respect to the parameters of the models (fixed effects and variance components) 
+#zero removed
+dfftns <- c(- 4 * nu.hat * dmu.dalpha * dmu.db^2 / mu.hat^2 +
+8 * nu.hat * d2mu.db.dalpha / mu.hat, 4 * dmu.db^2 / mu.hat)
+
+#And apply the delta method.
+fftns.se <- t(dfftns) %*% fishinv %*% dfftns
+fftns.se <- sqrt(as.vector(fftns.se))
+fftns.se
+# 0.1438496
+
+#ADDITIVE GENETIC VARIANCE SE 
+#calculate the gradient vector VA(W) with respect to the parameters of the model using these formula
+dvaw <- c(8 * nu.hat * d2mu.db.dalpha, 4 * dmu.db^2)
+
+#And then apply the delta method to get standard errors for this estimator
+vaw.se <- t(dvaw) %*% fishinv %*% dvaw
+vaw.se <- sqrt(as.vector(vaw.se))
+vaw.se
+# 0.008090885
+
+#MEAN FITNESS SE
+dmf <- c(dmu.dalpha, 0)
+mf.se <- t(dmf) %*% fishinv %*% dmf
+mf.se <- sqrt(as.vector(mf.se))
+mf.se
+# 0.014881
+```
+
+##PARENTAL YEAR 2
+```{r}
+#Load lifetime history data
+LB_yr2<-read.csv("LB_interim_4.csv")
+
+#delete NA values for germination, then delete -99 for germination. These are planting errors or where the position could not be found 
+LB_yr2<- LB_yr2[!is.na(LB_yr2$Germination), ]
+
+#make NAs for other nodes zero
+LB_yr2[is.na(LB_yr2$Survive_flowering),]$Survive_flowering <- 0
+LB_yr2[is.na(LB_yr2$Pods_collected),]$Pods_collected <- 0
+LB_yr2[is.na(LB_yr2$Total_seeds),]$Total_seeds <- 0
+LB_yr2[is.na(LB_yr2$Total_pods),]$Total_pods <- 0
+
+#delete entries with -99
+LB_yr2 <- LB_yr2[LB_yr2$Germination>-99,]
+LB_yr2 <- LB_yr2[LB_yr2$Survive_flowering> -99,] 
+LB_yr2 <- LB_yr2[LB_yr2$Total_seeds>-99,]
+
+####Check for nonsense data
+subset(LB_yr2, Total_seeds > 0 & Germination == 0)
+subset(LB_yr2, Total_seeds > 0 & Survive_flowering == 0)
+subset(LB_yr2, Total_seeds > 0 & Total_pods == 0)
+subset(LB_yr2, Total_seeds > 0 & Pods_collected == 0)
+
+subset(LB_yr2, Pods_collected >0 & Germination==0)
+subset(LB_yr2, Pods_collected >0 & Survive_flowering==0)
+subset(LB_yr2, Pods_collected >0 & Total_pods==0)
+subset(LB_yr2, Pods_collected <1 & Total_seeds>0)
+
+subset(LB_yr2, Total_pods > 0 & Germination ==0)
+subset(LB_yr2, Total_pods > 0 & Survive_flowering ==0)
+
+subset(LB_yr2, Survive_flowering >0 & Germination==0)
+subset(LB_yr2, Pods_collected>Total_pods)
+subset(LB_yr2, Pods_collected>0 & Pods_collected<1)
+subset(LB_yr2, Pods_collected>1 & Pods_collected<2)
+```
+
+####Do this when assessing the negative binomial distribution
+```{r}
+subset(LB_yr2, Pods_collected>Total_seeds)
+LB_yr2["356","Pods_collected"]= 1
+LB_yr2["839","Pods_collected"]= 0
+LB_yr2["2697","Pods_collected"]= 0
+LB_yr2["2789","Pods_collected"]= 0
+LB_yr2["3059","Pods_collected"]= 0
+```
+
+####Change nonsense data
+```{r}
+#change survive to flowering to 1
+LB_yr2["240","Survive_flowering"]=1
+LB_yr2["720","Survive_flowering"]=1
+LB_yr2["900","Survive_flowering"]=1
+LB_yr2["1589","Survive_flowering"]=1
+LB_yr2["1648","Survive_flowering"]=1
+LB_yr2["1980","Survive_flowering"]=1
+LB_yr2["2248","Survive_flowering"]=1
+LB_yr2["2850","Survive_flowering"]=1
+LB_yr2["3690","Survive_flowering"]=1
+
+LB_yr2["3059","Survive_flowering"]=1
+
+LB_yr2["900","Pods_collected"]= 1
+LB_yr2["2260","Pods_collected"]=1
+LB_yr2["900","Total_pods"]=1
+LB_yr2["2260","Total_pods"]=1
+
+LB_yr2["597","Survive_flowering"]=1
+LB_yr2["897","Survive_flowering"]=1
+
+#fix nonsense data for pods collected- doesn't like fractions
+LB_yr2["839","Pods_collected"]=1
+LB_yr2["839","Total_pods"]=1
+
+LB_yr2["3597", "Pods_collected"]=2
+
+#subset for parental generation
+LB19_aster_a<-subset(LB_yr2, Generation=="parental")
+
+#make sire and dam factors 
+LB_yr2$Dam<-as.factor(LB_yr2$Dam)
+LB_yr2$Sire<-as.factor(LB_yr2$Sire)
+
+#number that did and did not germinate in the progeny and parental generation
+LB_yr2 %>%
+  mutate(germ_f = as.factor(Germination)) %>% 
+  group_by(Generation, germ_f) %>% 
+  count() 
+
+#number of unique dams in the progeny and parental generation
+LB_yr2 %>%
+  group_by(Generation) %>% 
+  distinct(Dam) %>%
+  count()
+
+#number of unique sires. For progeny sires is their grandsires 
+LB_yr2 %>%
+  group_by(Generation) %>% 
+  distinct(Sire) %>%
+  count()
+```
+
+###Subset data
+```{r}
+#subset data for parental generation only
+LB19_aster_a<-subset(LB_yr2, Generation=="parental")
+LB19_aster_a$yloc<-as.numeric(LB19_aster_a$yloc)
+
+LB19_aster_a$Sire<-as.factor(LB19_aster_a$Sire)
+LB19_aster_a$Dam<-as.factor(LB19_aster_a$Dam)
+```
+
+#####check distributions
+```{r}
+#total pods
+#negative binomial 
+LByr2_flwr<-subset(LB19_aster_a, Survive_flowering>0)
+hist(LByr2_flwr$Total_pods)
+
+LB2.param <- fitdistr(LByr2_flwr$Total_pods, "negative binomial") 
+windows()
+hist(rnbinom(175, size =1.12, mu=3.67))
+hist(rpois(175, lambda=3.67))
+
+#total seeds 
+#negative binomial
+LByr2_pods<-subset(LB19_aster_a, Pods_collected>0)
+hist(LByr2_pods$Total_seeds)
+LB2.param3 <- fitdistr(LByr2_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(126, size =1.33 , mu=14.60))
+hist(rpois(126, lambda=14.60))
+```
+
+####Set up aster 
+```{r}
+library(aster)
+vars<-c("Germination","Survive_flowering","Total_pods","Pods_collected","Total_seeds")
+
+LB19_aster <- reshape(LB19_aster_a, varying = list(vars), direction = "long", timevar = "varb", times = as.factor(vars), v.names = "resp")
+
+####Check that the reshape worked 
+nrow(LB19_aster)
+nrow(LB19_aster_a)*length(vars)
+
+####Check fixed effect yloc is continuous
+class(LB19_aster$yloc)
+
+####Designate fitness variable, "Total_seeds"
+fit<-grepl("Total_seeds", as.character(LB19_aster$varb))
+fit<-as.numeric(fit)
+LB19_aster$fit<-fit
+
+####Check the correct variable is designated as the fitness variable
+with(LB19_aster, sort(unique(as.character(varb)[fit==0])))
+with(LB19_aster, sort(unique(as.character(varb)[fit==1])))
+
+####Add a variable "root" to LB19_aster files where value is 1
+LB19_aster <- data.frame(LB19_aster, root=1)
+
+####Set graphical node and dist. for fitness nodes(preds) 
+pred <- c(0,1,2,3,4)
+
+# subsampling distribution is binomial which is in the same family as Bernoulli. 1= Bernoulli, 2= poisson
+fam<-c(1,1,2,1,2)
+```
+
+###Random effects aster model
+```{r}
+#sire estimate is zero and Dam is significant
+LBaster19_full.m1 <- reaster(resp ~ varb+ fit:(yloc), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = LB19_aster)
+summary(LBaster19_full.m1)
+# Fixed Effects:
+#                        Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -3.622031   0.139599 -25.946  < 2e-16 ***
+# varbPods_collected    -1.863204   0.217885  -8.551  < 2e-16 ***
+# varbSurvive_flowering  2.297362   0.321609   7.143 9.11e-13 ***
+# varbTotal_pods         5.014023   0.149428  33.555  < 2e-16 ***
+# varbTotal_seeds        5.425762   0.141937  38.227  < 2e-16 ***
+# fit:yloc               0.001066   0.000246   4.333 1.47e-05 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.000000         NA      NA         NA    
+# Dam  0.054382   0.007722   7.043   9.43e-13 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#evaluate significance of sire alone
+#sire is significant. The estimate is 0.036407
+LBaster19_full.m2 <- reaster(resp ~ varb+ fit:yloc, list(Sire = ~ 0 + fit:Sire), pred, fam, varb, id, root, data = LB19_aster)
+summary(LBaster19_full.m2)
+# Fixed Effects:
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -3.6220306  0.1395986 -25.946  < 2e-16 ***
+# varbPods_collected    -1.8856835  0.2180416  -8.648  < 2e-16 ***
+# varbSurvive_flowering  2.2473185  0.3218656   6.982 2.91e-12 ***
+# varbTotal_pods         5.0140230  0.1494279  33.555  < 2e-16 ***
+# varbTotal_seeds        5.4399917  0.1418587  38.348  < 2e-16 ***
+# fit:yloc               0.0010971  0.0002338   4.692 2.71e-06 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.036407   0.008357   4.356   6.61e-06 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#evaluate dam alone
+#Dam is significant and the estimate is 0.05
+LBaster19_full.m3 <- reaster(resp ~ varb+ fit:yloc, list(Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = LB19_aster)
+summary(LBaster19_full.m3)
+# Fixed Effects:
+#                        Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -3.622031   0.139599 -25.946  < 2e-16 ***
+# varbPods_collected    -1.863204   0.217885  -8.551  < 2e-16 ***
+# varbSurvive_flowering  2.297362   0.321609   7.143 9.11e-13 ***
+# varbTotal_pods         5.014023   0.149428  33.555  < 2e-16 ***
+# varbTotal_seeds        5.425762   0.141937  38.227  < 2e-16 ***
+# fit:yloc               0.001066   0.000246   4.333 1.47e-05 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#     Estimate Std. Error z value Pr(>|z|)/2    
+# Dam 0.054382   0.007722   7.043   9.43e-13 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+####Combine Sire and Dam into one random effect, `Parental`
+modmat.sire <- model.matrix(~ 0 + fit:Sire, LB19_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, LB19_aster)
+modmat.siredam <- cbind(modmat.sire, modmat.dam)
+
+#model with parental and yloc
+rout_LB19 <- reaster(resp ~ fit + varb +fit:(yloc), list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = LB19_aster)
+sout_LB19 <-summary(rout_LB19)
+sout_LB19
+
+# Fixed Effects:
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -3.6220307  0.1395986 -25.946  < 2e-16 ***
+# fit                    5.4272202  0.1420180  38.215  < 2e-16 ***
+# varbPods_collected    -1.8664160  0.2179176  -8.565  < 2e-16 ***
+# varbSurvive_flowering  2.2908346  0.3216889   7.121 1.07e-12 ***
+# varbTotal_pods         5.0140231  0.1494279  33.555  < 2e-16 ***
+# fit:yloc               0.0010730  0.0002444   4.391 1.13e-05 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.039067   0.006213   6.288   1.61e-10 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#test for significance of yloc
+rout_LB19_2 <- reaster(resp ~ fit + varb, list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = LB19_aster)
+summary(rout_LB19_2)
+# Fixed Effects:
+#                       Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)            -3.6220     0.1396 -25.946  < 2e-16 ***
+# fit                     5.4421     0.1419  38.339  < 2e-16 ***
+# varbPods_collected     -1.8795     0.2180  -8.620  < 2e-16 ***
+# varbSurvive_flowering   2.2597     0.3220   7.018 2.25e-12 ***
+# varbTotal_pods          5.0140     0.1494  33.555  < 2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.041643   0.006293   6.617   1.83e-11 ***
+
+anova(rout_LB19_2, rout_LB19)
+# Analysis of Deviance Table
+# 
+# Model 1: resp ~ fit + varb, ~0 + modmat.siredam
+# Model 2: resp ~ fit + varb + fit:(yloc), ~0 + modmat.siredam
+#   Mod Df Fix Mod Df Rand Mod Dev Df Fix Df Rand Deviance    P-value
+# 1          5           1  654.03                                   
+# 2          6           1  675.35      1       0   21.321 3.8846e-06
+```
+
+###Mapping function 
+```{r}
+#following Geyer et al. (2022)
+library(numDeriv)
+fishinv<-solve(sout_LB19$fisher)
+
+map.factory <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  modmat <- rout$obj$modmat[1, , , drop = FALSE]
+  # Set Yloc = 0
+  modmat[ , , "fit:yloc"] <- 0
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added, second value is number of nodes 
+  # return map function
+  function (b) {
+    stopifnot(is.numeric(b))
+    stopifnot(is.finite(b))
+    stopifnot(length(b) == 1)
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE)
+  
+    xi <- matrix(xi, ncol = nnode)
+    # always use drop = FALSE unless you are sure you don't want that
+    # here if we omit drop = FALSE and there is only one non-subsampling
+    # node, the code will break (apply will give an error)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod) #every individual
+    # mu is unconditional mean values for model without subsampling
+    # in this application all components mu are the same because no
+    # covariates except varb, so just return only one
+    mu[1] 
+  }
+}
+
+#pods_collected is the subsampling node 
+map <- map.factory(rout_LB19, vars == "Pods_collected")
+
+#extract breeding values 
+bhat <- rout_LB19$b 
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+
+#gives the number of unique sires 
+length(bhat.sire)
+vectorized.map <- Vectorize(map)
+
+#breeding values for sire groups on the mean value parameter scale 
+bhat.sire.mu <- vectorized.map(bhat.sire)
+bhat.sire.mu<-as.data.frame(bhat.sire.mu)
+write.csv(bhat.sire.mu, "bhat.sire.mu.csv")
+
+#MEAN FITNESS
+map <- map.factory(rout_LB19, vars == "Pods_collected")
+mf<-map(0)
+mf
+#0.7178369
+
+#additive genetic variance for fitness
+vaw <- rout_LB19$sigma["Parental"]^2 * grad(map, 0)^2
+# get rid of name
+vaw <- as.numeric(vaw)
+vaw <- vaw * 4
+vaw
+#0.4004332
+
+####FFTNS
+fftns <- vaw / mf
+fftns
+#0.5578332
+
+#progeny prediction
+pred_prog <- fftns+mf
+  
+# get SE
+map.factory.too <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  # modmat for one individual. Taking the first row of modmat- there is one row for each individual
+  modmat <- rout$obj$modmat[1, , , drop = FALSE] #this only takes the first row 
+  # Set Yloc = 0
+  modmat[ , , "fit:yloc"] <- 0 #here Yloc is canceled out-> they all become zero
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added
+  # return map function
+  function (balpha) {
+    stopifnot(is.numeric(balpha))
+    stopifnot(is.finite(balpha))
+    stopifnot(length(balpha) == 1 + length(alpha))
+    b <- balpha[1]
+    alpha <- balpha[-1]
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE
+    )
+    xi <- matrix(xi, ncol = nnode)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod)
+    mu[1]
+  }
+}
+
+map.too <- map.factory.too(rout_LB19, vars == "Pods_collected")
+
+#center sire means on zero 
+balpha.hat <- c(0, rout_LB19$alpha)
+
+map.too(balpha.hat)
+all.equal(map(0), map.too(balpha.hat))
+
+#first and second derivatives
+g<-grad(map.too, balpha.hat)
+h <- hessian(map.too, balpha.hat)
+
+#these are partial derivatives
+dmu.db <- g[1]
+dmu.dalpha <- g[-1]
+d2mu.db.dalpha <- h[1, -1]
+
+#give names to the estimators in our formulas
+mu.hat <- map.too(balpha.hat)
+nu.hat <- rout_LB19$nu["Parental"]
+
+#calculations for the gradient vector of the FFTNS prediction with respect to the parameters of the models (fixed effects and variance components) 
+dfftns <- c(- 4 * nu.hat * dmu.dalpha * dmu.db^2 / mu.hat^2 +
+8 * nu.hat * d2mu.db.dalpha / mu.hat, 4 * dmu.db^2 / mu.hat)
+
+#And apply the delta method.
+fftns.se <- t(dfftns) %*% fishinv %*% dfftns
+fftns.se <- sqrt(as.vector(fftns.se))
+fftns.se
+#0.2194951
+
+#ADDITIVE GENETIC VARIANCE SE 
+#calculate the gradient vector VA(W) with respect to the parameters of the model using these formulas
+dvaw <- c(8 * nu.hat * d2mu.db.dalpha, 4 * dmu.db^2)
+
+#And then apply the delta method to get standard errors for this estimator.
+vaw.se <- t(dvaw) %*% fishinv %*% dvaw
+vaw.se <- sqrt(as.vector(vaw.se))
+vaw.se
+#0.1358222
+
+#MEAN FITNESS SE
+dmf <- c(dmu.dalpha, 0)
+mf.se <- t(dmf) %*% fishinv %*% dmf
+mf.se <- sqrt(as.vector(mf.se))
+mf.se
+#0.09401288
+```
+
+##PROGENY YEAR 2
+```{r}
+####subset data frame for progeny generation
+LB19_aster_b<-subset(LB_yr2, Generation=="progeny")
+```
+
+###check distributions
+```{r}
+#total seeds 
+#negative binomial
+library(MASS)
+LByr2_prog_pods<-subset(LB19_aster_b,Survive_flowering >0)
+hist(LByr2_prog_pods$Total_seeds)
+LB2.prog.param3 <- fitdistr(LByr2_prog_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(6, size =0.389 , mu=11.833))
+hist(rpois(6, lambda=11.833))
+alpha.LB2.prog<-round(LB2.prog.param3$estimate[1],2)
+```
+
+###Set up aster 
+```{r}
+vars<-c("Germination","Survive_flowering","Total_seeds")
+LB19_aster_prog <- reshape(LB19_aster_b, varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#Check that the reshape worked 
+nrow(LB19_aster_prog)
+nrow(LB19_aster_b)*length(vars)
+
+#designate fitness variable
+fit<-grepl("Total_seeds", as.character(LB19_aster_prog$varb))
+fit<-as.numeric(fit)
+LB19_aster_prog$fit<-fit
+
+#check the correct variable is designated as the fitness variable 
+with(LB19_aster_prog, sort(unique(as.character(varb)[fit==0])))
+with(LB19_aster_prog, sort(unique(as.character(varb)[fit==1])))
+
+#Add a variable "root" to where value is 1
+LB19_aster_prog <- data.frame(LB19_aster_prog, root=1)
+
+#fixed effect yloc should be continuous
+class(LB19_aster_prog$yloc)
+
+####Set graphical nodes 
+pred <- c(0,1,2)
+fam<-c(1,1,2)
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-data.frame(pvars, vars, sapply(fam.default(), as.character)[fam])
+colnames(bar) <- c("pred", "succ", "fam")
+print(bar, right = FALSE, row.names = FALSE)
+```
+
+###Fixed effect aster model for progeny fitness 
+```{r}
+#estimate mean fitness using poisson terminal node 
+seeds.out_LB19_prog <- aster(resp ~ varb+ fit:(yloc), pred, fam, varb, id, root, data = LB19_aster_prog)  
+
+summary(seeds.out_LB19_prog, info.tol = 1e-8, se.fit=TRUE)
+#     fam = fam, varvar = varb, idvar = id, root = root, data = LB19_aster_prog)
+# 
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -4.7050155  1.0022599  -4.694 2.67e-06 ***
+# varbSurvive_flowering -4.3335088  2.4785799  -1.748   0.0804 .  
+# varbTotal_seeds        7.1751788  1.0092793   7.109 1.17e-12 ***
+# fit:yloc               0.0002119  0.0010799   0.196   0.8445    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+class(LB19_aster_prog$yloc)
+# get hypothetical individual
+LB_19_hyp <- subset(LB19_aster_prog, id == 1)
+# set yloc to 0
+LB_19_hyp$yloc <- 0
+# set resp to 1
+LB_19_hyp$resp <- 1
+
+# predict conditional fitness estimates for this hypothetical individual
+LB_19_hyp.p <- predict(seeds.out_LB19_prog, varvar = varb, idvar = id, root = root,
+  newdata = LB_19_hyp, model.type = "conditional")
+
+# take the product of these conditional estimates 
+prod(LB_19_hyp.p)
+# 0.3093831
+```
+
+###Fixed effect aster model for progeny fitness with negative binomial 
+```{r}
+#give each node a number starting at 0 and designate the terminal fitness node as negative binomial
+pred <- c(0,1,2)
+fam<-c(1,1,2)
+famlist <- list(fam.bernoulli(),fam.negative.binomial(size = alpha.LB2.prog))
+sapply(famlist, as.character)[fam] 
+famlist
+
+#include famlist in the model
+seeds.out_LB19_prog <- aster(resp ~ varb+ fit:(yloc), pred, fam, famlist=famlist, varb, id, root, data = LB19_aster_prog) 
+summary(seeds.out_LB19_prog, info.tol = 1e-8, se.fit=TRUE)
+#   aster.formula(formula = resp ~ varb + fit:(yloc), pred = pred, 
+#     fam = fam, varvar = varb, idvar = id, root = root, data = LB19_aster_prog, 
+#     famlist = famlist)
+# 
+#                         Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)           -4.705e+00  1.002e+00  -4.694 2.67e-06 ***
+# varbSurvive_flowering  5.333e+00  2.058e+00   2.592  0.00955 ** 
+# varbTotal_seeds        5.672e+00  1.002e+00   5.658 1.53e-08 ***
+# fit:yloc               6.214e-05  5.864e-04   0.106  0.91561    
+
+LB_19_hyp <- subset(LB19_aster_prog, id == 1)
+# set yloc to 0
+LB_19_hyp$yloc <- 0
+# set resp to 1
+LB_19_hyp$resp <- 1
+
+LB_19_hyp.p <- predict(seeds.out_LB19_prog, varvar = varb, idvar = id, root = root,
+  newdata = LB_19_hyp, model.type = "conditional")
+
+mu.fit<-prod(LB_19_hyp.p)
+mu.fit
+#0.3086834
+```
+
+###Estimate mean fitness and standard error
+```{r}
+#use poisson terminal node 
+newdata<-data.frame(yloc=0, root=1)
+for (v in vars)
+    newdata[[v]] <- 1
+dim(newdata)
+
+renewdata <- reshape(newdata, varying = list(vars),
+    direction = "long", timevar = "varb", times = as.factor(vars),
+    v.names = "resp")
+dim(renewdata)
+names(renewdata)
+
+fit<-grepl("Total_seeds", as.character(renewdata$varb))
+renewdata<-data.frame(renewdata, fit=as.integer(fit))
+
+nind<-nrow(newdata)
+nnode<-length(vars)
+
+amat <- array(0,c(nind, nnode, nind))
+dim(amat)
+
+foo <- grepl("Total_seeds", vars)
+for (k in 1:nind)
+   amat[k, foo, k] <- 1
+
+pout <- predict(seeds.out_LB19_prog, varvar = varb, idvar = id,
+    root = root, newdata = renewdata, amat = amat, se.fit = TRUE)
+
+pout.p <- cbind(pout$fit, pout$se.fit)
+colnames(pout.p) <- c("mu", "se")
+pout.p
+#0.3093831 0.1308355
+
+round(pout.p, 4)
+# mu       se
+#  0.3094  0.1308
+```
+
+#SOUTH DAKOTA
+##PARENTAL YEAR 1
+```{r}
+###Load data
+SD_coords_lifehist <- read.csv("SD_coords_lifehist.csv")
+
+#check for nonsense data
+subset(SD_coords_lifehist, Total_seeds > 0 & Germination == 0)
+subset(SD_coords_lifehist, Total_seeds > 0 & Surv_Flwr == 0)
+subset(SD_coords_lifehist, Total_seeds > 0 & Total_pods == 0)
+subset(SD_coords_lifehist, Total_pods > 0 & Surv_Flwr ==0)
+subset(SD_coords_lifehist, Surv_Flwr > 0 & Germination ==0)
+subset(SD_coords_lifehist, Total_seeds > 0 & Total_pods_collected==0)
+subset(SD_coords_lifehist, Total_pods_collected >0 & Total_pods ==0)
+subset(SD_coords_lifehist, Total_pods >0 & Total_pods_collected ==0)
+subset(SD_coords_lifehist, Total_pods >0 & Total_seeds ==0)
+subset(SD_coords_lifehist, Total_pods_collected >0 & Total_seeds ==0)
+
+#have to strike this record because the plant produced pods but seeds were not collected
+SD_coords_lifehist<-subset(SD_coords_lifehist, Planting_position!='100-31.4')
+
+#produced no seeds so make pod count zero for aster
+SD_coords_lifehist["2369", "Total_pods"]=0
+SD_coords_lifehist["2369", "Total_pods_collected"]=0
+
+#make sire and dam factors 
+SD_coords_lifehist$Sire<- as.factor(SD_coords_lifehist$Sire)
+SD_coords_lifehist$Dam<- as.factor(SD_coords_lifehist$Dam)
+```
+
+###Check for germs
+```{r}
+#number that did and did not germinate in the progeny and parental generation
+SD_coords_lifehist %>%
+  mutate(germ_f = as.factor(Germination)) %>% 
+  group_by(germ_f) %>% 
+  count() 
+
+#number of unique dams in the progeny and parental generation
+SD_coords_lifehist %>%
+  distinct(Dam) %>%
+  count()
+
+#number of unique sires 
+SD_coords_lifehist %>%
+  distinct(Sire) %>%
+  count()
+```
+
+####check distributions
+```{r}
+#total pods
+#negative binomial
+SDyr1_flwr<-subset(SD_coords_lifehist, Surv_Flwr>0)
+hist(SDyr1_flwr$Total_pods)
+
+SD1.param <- fitdistr(SDyr1_flwr$Total_pods, "negative binomial") 
+windows()
+hist(rnbinom(65, size =0.636, mu=91.569))
+hist(rpois(65, lambda=91.569))
+
+#total seeds 
+#negative binomial
+SDyr1_pods<-subset(SD_coords_lifehist, Total_pods_collected>0)
+hist(SDyr1_pods$Total_seeds)
+SD1.param3 <- fitdistr(SDyr1_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(61, size = 0.769, mu=300.033))
+hist(rpois(61, lambda=300.033))
+```
+
+###Set up aster 
+```{r}
+####Reshape data to longform
+vars<-c("Germination","Surv_Flwr","Total_pods","Total_pods_collected","Total_seeds")
+SD18_aster <- reshape(SD_coords_lifehist,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+####Check that the reshape worked 
+nrow(SD18_aster)
+nrow(SD_coords_lifehist)*length(vars)
+
+####Check fixed effect ylocation is continuous
+class(SD18_aster$yloc)
+
+####Designate fitness variable, "Total_seeds" 
+fit<-grepl("Total_seeds", as.character(SD18_aster$varb))
+fit<-as.numeric(fit)
+SD18_aster$fit<-fit
+
+####Check the correct variable is designated as the fitness variable
+with(SD18_aster, sort(unique(as.character(varb)[fit==0])))
+with(SD18_aster, sort(unique(as.character(varb)[fit==1])))
+
+####Add a variable "root" to SD18_aster files where value is 1
+SD18_aster <- data.frame(SD18_aster, root=1)
+
+####Set graphical node and dist. for fitness nodes(preds) 
+pred <- c(0,1,2,3,4)
+# subsampling arrow is bernoulli
+fam<-c(1,1,2,1,2)
+```
+
+###random effect aster models
+```{r}
+#models will not run with yloc- they are overspecified
+#check significance of sire and dam
+SDaster18_full.m1 <- reaster(resp ~ varb, list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = SD18_aster)
+summary(SDaster18_full.m1)
+# Fixed Effects:
+#                          Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)               -4.1361     0.1748  -23.67   <2e-16 ***
+# varbSurv_Flwr            -85.1664     1.2446  -68.43   <2e-16 ***
+# varbTotal_pods             8.8626     0.1755   50.48   <2e-16 ***
+# varbTotal_pods_collected  -3.3544     0.1865  -17.99   <2e-16 ***
+# varbTotal_seeds            6.2139     0.1749   35.52   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#       Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.0014396  0.0018510   0.778      0.218    
+# Dam  0.0043437  0.0007868   5.520   1.69e-08 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#sire is significant. The estimate is 0.003548
+SDaster18_full.m2 <- reaster(resp ~ varb, list(Sire = ~ 0 + fit:Sire), pred, fam, varb, id, root, data = SD18_aster)
+summary(SDaster18_full.m2)
+# Fixed Effects:
+#                          Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)               -4.1361     0.1748  -23.67   <2e-16 ***
+# varbSurv_Flwr            -85.4134     1.2443  -68.64   <2e-16 ***
+# varbTotal_pods             8.8626     0.1756   50.48   <2e-16 ***
+# varbTotal_pods_collected  -3.3546     0.1865  -17.99   <2e-16 ***
+# varbTotal_seeds            6.2153     0.1749   35.53   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.003548   0.000644   5.508   1.81e-08 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Dam is significant and the estimate is 0.0045788
+SDaster18_full.m3 <- reaster(resp ~ varb, list(Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = SD18_aster)
+summary(SDaster18_full.m3)
+# Fixed Effects:
+#                          Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)               -4.1361     0.1748  -23.67   <2e-16 ***
+# varbSurv_Flwr            -85.1675     1.2446  -68.43   <2e-16 ***
+# varbTotal_pods             8.8626     0.1756   50.48   <2e-16 ***
+# varbTotal_pods_collected  -3.3544     0.1865  -17.99   <2e-16 ***
+# varbTotal_seeds            6.2140     0.1749   35.52   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Dam 0.0045788  0.0005368    8.53     <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+####Combine Sire and Dam into one random effect, "Parental"
+modmat.sire <- model.matrix(~ 0 + fit:Sire, SD18_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, SD18_aster)
+modmat.siredam <- cbind(modmat.sire, modmat.dam)
+ 
+#use this model
+rout_SD18 <- reaster(resp ~ fit+varb, list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = SD18_aster)
+
+summary(rout_SD18)
+# Fixed Effects:
+#                          Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)               -4.1361     0.1748  -23.67   <2e-16 ***
+# fit                        6.2139     0.1749   35.52   <2e-16 ***
+# varbSurv_Flwr            -85.1736     1.2447  -68.43   <2e-16 ***
+# varbTotal_pods             8.8626     0.1756   50.48   <2e-16 ***
+# varbTotal_pods_collected  -3.3544     0.1865  -17.99   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#           Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.0033523  0.0004299   7.797   3.17e-15 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+```
+
+```{r}
+sout_SD18 <-summary(rout_SD18)
+sout_SD18
+```
+
+### Mapping function 
+```{r}
+#follwing Geyer et al.(2022)
+library(numDeriv)
+fishinv<-solve(sout_SD18$fisher)
+
+#there is no fixed effect in this model
+map.factory <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+   # return map function
+  function (b) {
+    stopifnot(is.numeric(b))
+    stopifnot(is.finite(b))
+    stopifnot(length(b) == 1)
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      newcoef = alpha,
+      model.type = "conditional",
+      is.always.parameter = TRUE)
+    xi <- matrix(xi, ncol = nnode)
+    # always use drop = FALSE unless you are sure you don't want that
+    # here if we omit drop = FALSE and there is only one non-subsampling
+    # node, the code will break (apply will give an error)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod) #every individual
+    # mu is unconditional mean values for model without subsampling
+    # in this application all components mu are the same because no
+    # covariates except varb, so just return only one
+    mu[1] 
+  }
+}
+
+map <- map.factory(rout_SD18, vars == "Total_pods_collected")
+
+#extract breeding values 
+class(rout_SD18$obj) 
+bhat <- rout_SD18$b 
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+
+#number of sires
+length(bhat.sire)
+vectorized.map <- Vectorize(map)
+bhat.sire.mu <- vectorized.map(bhat.sire)
+bhat.sire.mu<-as.data.frame(bhat.sire.mu)
+write.csv(bhat.sire.mu, "bhat.sire.mu.csv")
+
+#MEAN FITNESS
+map <- map.factory(rout_SD18, vars == "Total_pods_collected")
+mf<-map(0)
+mf
+#7.201985
+
+#additive genetic variance for fitness
+vaw <- rout_SD18$sigma["Parental"]^2 * grad(map, 0)^2
+# get rid of name
+vaw <- as.numeric(vaw)
+vaw <- vaw * 4
+vaw
+#174.6005
+
+####FFTNS
+fftns <- vaw / mf
+fftns
+#24.24338
+
+#predicted progeny generation fitness
+ppf<-fftns+mf
+ppf
+#31.44536
+
+# STANDARD ERRORS 
+map.factory.too <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  # return map function
+  function (balpha) {
+    stopifnot(is.numeric(balpha))
+    stopifnot(is.finite(balpha))
+    stopifnot(length(balpha) == 1 + length(alpha))
+    b <- balpha[1]
+    alpha <- balpha[-1]
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      newcoef = alpha,
+      model.type = "conditional",
+      is.always.parameter = TRUE
+    )
+    xi <- matrix(xi, ncol = nnode)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod)
+    # mu is unconditional mean values for model without subsampling
+    mu[1]
+  }
+}
+
+map.too <- map.factory.too(rout_SD18, vars == "Total_pods_collected")
+#centering sire means on zero
+balpha.hat <- c(0, rout_SD18$alpha)
+
+map.too(balpha.hat)
+
+all.equal(map(0), map.too(balpha.hat))
+
+#first and second derivatives
+g<-grad(map.too, balpha.hat)
+
+#calculates the nxn matrix
+h <- hessian(map.too, balpha.hat)
+
+#these are partial derivatives
+dmu.db <- g[1]
+dmu.dalpha <- g[-1]
+d2mu.db.dalpha <- h[1, -1]
+
+# give names to the estimators in our formulas.
+mu.hat <- map.too(balpha.hat)
+nu.hat <- rout_SD18$nu["Parental"]
+
+#calculations for the gradient vector of the FFTNS prediction with respect to the parameters of the models (fixed effects and variance components) 
+dfftns <- c(- 4 * nu.hat * dmu.dalpha * dmu.db^2 / mu.hat^2 +
+8 * nu.hat * d2mu.db.dalpha / mu.hat, 4 * dmu.db^2 / mu.hat)
+
+#And apply the delta method.
+fftns.se <- t(dfftns) %*% fishinv %*% dfftns
+fftns.se <- sqrt(as.vector(fftns.se))
+fftns.se
+#9.82904
+
+#ADDITIVE GENETIC VARIANCE SE 
+# calculate the gradient vector VA(W) with respect to the parameters of the model using these formulas
+dvaw <- c(8 * nu.hat * d2mu.db.dalpha, 4 * dmu.db^2)
+
+#And then apply the delta method to get standard errors for this estimator
+vaw.se <- t(dvaw) %*% fishinv %*% dvaw
+vaw.se <- sqrt(as.vector(vaw.se))
+vaw.se
+#44.81272
+
+#MEAN FITNESS SE
+dmf <- c(dmu.dalpha, 0)
+mf.se <- t(dmf) %*% fishinv %*% dmf
+mf.se <- sqrt(as.vector(mf.se))
+mf.se
+#1.692283
+```
+
+##PARENTAL YEAR 2
+####load and clean data
+```{r}
+library(dplyr)
+
+#load data
+SD_lifehist_19<-read.csv("SD_lifehist_19.csv")
+
+#delete NA from germination-have to do this first because this code cannot evaluate data with NA, so it won't work to delete the -99 before NAs are gone
+SD_lifehist_19<-SD_lifehist_19[!is.na(SD_lifehist_19$Germination), ] 
+
+#add zeros to data that are NA
+SD_lifehist_19$surv_flwr[is.na(SD_lifehist_19$surv_flwr)]<-0
+SD_lifehist_19$Total_pods[is.na(SD_lifehist_19$Total_pods)]<-0
+SD_lifehist_19$Pods_collected[is.na(SD_lifehist_19$Pods_collected)]<-0
+SD_lifehist_19$Total_seeds[is.na(SD_lifehist_19$Total_seeds)]<-0
+
+#delete entries with -99
+SD_lifehist_19 <- SD_lifehist_19[SD_lifehist_19$Germination>-99,]
+SD_lifehist_19 <- SD_lifehist_19[SD_lifehist_19$Total_seeds>-99,]
+```
+
+#####Check for nonsense data
+```{r}
+#These are changed in the datasheets
+subset(SD_lifehist_19, Total_seeds > 0 & Germination == 0)
+subset(SD_lifehist_19, Total_seeds > 0 & surv_flwr == 0)
+subset(SD_lifehist_19, Total_seeds > 0 & Total_pods == 0)
+subset(SD_lifehist_19, Total_pods > 0 & surv_flwr ==0)
+subset(SD_lifehist_19, surv_flwr > 0 & Germination ==0)
+subset(SD_lifehist_19, Total_seeds > 0 & Pods_collected==0)
+subset(SD_lifehist_19, Pods_collected >0 & Total_pods ==0)
+
+SD_lifehist_19["1202","Germination"]=1
+SD_lifehist_19["1481","Germination"]=1
+SD_lifehist_19["1496","Germination"]=1
+
+SD_lifehist_19["1202","surv_flwr"]=1
+SD_lifehist_19["1481","surv_flwr"]=1
+SD_lifehist_19["1496","surv_flwr"]=1
+SD_lifehist_19["5581","surv_flwr"]=1
+SD_lifehist_19["5638","surv_flwr"]=1
+
+SD_lifehist_19["5722","surv_flwr"]=1
+
+subset(SD_lifehist_19, Pods_collected <1 & Pods_collected >0)
+#this value says 0.5 pods which aster cannot handle so it should be 1 pod
+SD_lifehist_19["5549","Pods_collected"]=1
+```
+
+###check for germs
+```{r}
+###find number that germinated in both generations 
+SD_lifehist_19 %>%
+  mutate(germ_f = as.factor(Germination)) %>% 
+  group_by(Generation, germ_f) %>%  
+  count() 
+
+#number of dams for each generation
+SD_lifehist_19 %>%
+  group_by(Generation) %>% 
+  distinct(Dam) %>%
+  count()
+
+# number of sires. For progeny it is grandsires as they were open pollinated 
+SD_lifehist_19 %>%
+  group_by(Generation) %>% 
+  distinct(Sire) %>%
+  count() 
+```
+
+###Subset into parental and progeny generation
+```{r}
+SD_lifehist_19$Generation<-as.factor(SD_lifehist_19$Generation)
+levels(SD_lifehist_19$Generation)
+SD_lifehist_19_b<-subset(SD_lifehist_19, Generation== "progeny")
+SD_lifehist_19_a<-subset(SD_lifehist_19, Generation=="parental")
+```
+
+#####check distributions
+```{r}
+#total pods
+#negative binomial
+SDyr1_flwr<-subset(SD_lifehist_19_a, surv_flwr>0)
+hist(SDyr1_flwr$Total_pods)
+
+SD1.param <- fitdistr(SDyr1_flwr$Total_pods, "negative binomial") 
+windows()
+hist(rnbinom(116, size =0.869, mu=19.836))
+hist(rpois(116, lambda=19.836))
+
+#total seeds 
+#negative binomial
+SDyr1_pods<-subset(SD_lifehist_19_a, Pods_collected>0)
+hist(SDyr1_pods$Total_seeds)
+SD1.param3 <- fitdistr(SDyr1_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(97, size =1.09 , mu=29.01))
+hist(rpois(97, lambda=29.01))
+```
+
+###Set up aster
+```{r}
+####Reshape data to longform
+vars<-c("Germination","surv_flwr","Total_pods","Pods_collected","Total_seeds")
+SD19_aster <- reshape(SD_lifehist_19_a,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+####Check that the reshape worked 
+nrow(SD19_aster)
+nrow(SD_lifehist_19_a)*length(vars)
+
+####Check fixed effect yloc is continuous
+class(SD19_aster$yloc)
+
+####Designate fitness variable, "Total_seeds" 
+fit<-grepl("Total_seeds", as.character(SD19_aster$varb))
+fit<-as.numeric(fit)
+SD19_aster$fit<-fit
+
+####Check the correct variable is designated as the fitness variable 
+with(SD19_aster, sort(unique(as.character(varb)[fit==0])))
+with(SD19_aster, sort(unique(as.character(varb)[fit==1])))
+
+####Add a variable "root" to SD18_aster files where value is 1
+SD19_aster <- data.frame(SD19_aster, root=1)
+
+####Set graphical node and dist. for fitness nodes(preds) 
+pred <- c(0,1,2,3,4)
+
+# subsampling distribution is binomial which is in the same family as Bernoulli
+fam<-c(1,1,2,1,2)
+
+#convert sire and dam to factors
+SD19_aster <- transform(SD19_aster, Sire = as.factor(Sire))
+SD19_aster <- transform(SD19_aster, Dam = as.factor(Dam))
+```
+
+###random effect aster model
+```{r}
+#full model
+SDaster19_full.m1 <- reaster(resp ~ varb+ fit:(yloc), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = SD19_aster)
+summary(SDaster19_full.m1)
+# Fixed Effects:
+#                      Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)        -4.498e+00  2.138e-01 -21.040  < 2e-16 ***
+# varbPods_collected -3.864e+00  2.646e-01 -14.600  < 2e-16 ***
+# varbsurv_flwr      -1.253e+01  6.013e-01 -20.837  < 2e-16 ***
+# varbTotal_pods      8.006e+00  2.150e-01  37.239  < 2e-16 ***
+# varbTotal_seeds     6.521e+00  2.147e-01  30.372  < 2e-16 ***
+# fit:yloc           -9.509e-04  2.864e-04  -3.321 0.000898 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.010199   0.012357   0.825      0.205    
+# Dam  0.025690   0.005974   4.300   8.54e-06 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#sire is significant. The estimate is 0.020221
+SDaster19_full.m2 <- reaster(resp ~ varb+ fit:yloc, list(Sire = ~ 0 + fit:Sire), pred, fam, varb, id, root, data = SD19_aster)
+summary(SDaster19_full.m2)
+# Fixed Effects:
+#                      Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)        -4.498e+00  2.138e-01 -21.040  < 2e-16 ***
+# varbPods_collected -3.869e+00  2.647e-01 -14.620  < 2e-16 ***
+# varbsurv_flwr      -1.257e+01  6.014e-01 -20.908  < 2e-16 ***
+# varbTotal_pods      8.006e+00  2.150e-01  37.239  < 2e-16 ***
+# varbTotal_seeds     6.525e+00  2.147e-01  30.393  < 2e-16 ***
+# fit:yloc           -9.727e-04  2.766e-04  -3.517 0.000436 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#      Estimate Std. Error z value Pr(>|z|)/2    
+# Sire 0.020221   0.005313   3.806   7.07e-05 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#Dam is significant and the estimate is 0.027340
+SDaster19_full.m3 <- reaster(resp ~ varb+ fit:yloc, list(Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = SD19_aster)
+summary(SDaster19_full.m3)
+# Fixed Effects:
+#                      Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)        -4.498e+00  2.138e-01 -21.040  < 2e-16 ***
+# varbPods_collected -3.864e+00  2.646e-01 -14.601  < 2e-16 ***
+# varbsurv_flwr      -1.253e+01  6.013e-01 -20.841  < 2e-16 ***
+# varbTotal_pods      8.006e+00  2.150e-01  37.239  < 2e-16 ***
+# varbTotal_seeds     6.521e+00  2.147e-01  30.374  < 2e-16 ***
+# fit:yloc           -9.540e-04  2.868e-04  -3.326 0.000881 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#     Estimate Std. Error z value Pr(>|z|)/2    
+# Dam 0.027340   0.004504    6.07   6.39e-10 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+####Combine Sire and Dam into one random effect, Parental
+modmat.sire <- model.matrix(~ 0 + fit:Sire, SD19_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, SD19_aster)
+modmat.siredam <- cbind(modmat.sire, modmat.dam)
+
+#use this model 
+rout_SD19 <- reaster(resp ~ fit+varb +fit:(yloc), list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = SD19_aster)
+
+summary(rout_SD19)
+# Fixed Effects:
+#                      Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)        -4.498e+00  2.138e-01 -21.040  < 2e-16 ***
+# fit                 6.521e+00  2.147e-01  30.368  < 2e-16 ***
+# varbPods_collected -3.864e+00  2.646e-01 -14.601  < 2e-16 ***
+# varbsurv_flwr      -1.253e+01  6.014e-01 -20.833  < 2e-16 ***
+# varbTotal_pods      8.006e+00  2.150e-01  37.239  < 2e-16 ***
+# fit:yloc           -9.461e-04  2.839e-04  -3.333 0.000861 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Square Roots of Variance Components (P-values are one-tailed):
+#          Estimate Std. Error z value Pr(>|z|)/2    
+# Parental 0.020038   0.003582   5.594   1.11e-08 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#compare significance of yloc
+rout_SD19_b <- reaster(resp ~ fit+varb, list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = SD19_aster)
+anova(rout_SD19_b, rout_SD19)
+# Model 1: resp ~ fit + varb, ~0 + modmat.siredam
+# Model 2: resp ~ fit + varb + fit:(yloc), ~0 + modmat.siredam
+#   Mod Df Fix Mod Df Rand Mod Dev Df Fix Df Rand Deviance    P-value
+# 1          5           1   11694                                   
+# 2          6           1   11706      1       0   12.039 0.00052101
+
+sout_SD19<-summary(rout_SD19)
+sout_SD19
+```
+
+###Mapping function 
+```{r}
+#following Geyer et al. (2022)
+library(numDeriv)
+fishinv<-solve(sout_SD19$fisher)
+
+map.factory <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  modmat <- rout$obj$modmat[1, , , drop = FALSE]
+  # Set Yloc = 0
+  modmat[ , , "fit:yloc"] <- 0
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added, five is number of nodes 
+  # return map function
+  function (b) {
+    stopifnot(is.numeric(b))
+    stopifnot(is.finite(b))
+    stopifnot(length(b) == 1)
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE)
+  
+    xi <- matrix(xi, ncol = nnode)
+    # always use drop = FALSE unless you are sure you don't want that
+    # here if we omit drop = FALSE and there is only one non-subsampling
+    # node, the code will break (apply will give an error)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod) #every individual
+    # mu is unconditional mean values for model without subsampling
+    # in this application all components mu are the same because no
+    # covariates except varb, so just return only one
+    mu[1] 
+  }
+}
+map <- map.factory(rout_SD19, vars == "Pods_collected")
+
+#breeding values
+bhat <- rout_SD19$b 
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+
+#unique number of sires 
+length(bhat.sire)
+
+vectorized.map <- Vectorize(map)
+bhat.sire.mu <- vectorized.map(bhat.sire)
+bhat.sire.mu<-as.data.frame(bhat.sire.mu)
+write.csv(bhat.sire.mu, "bhat.sire.mu.csv")
+
+#mean fitness
+map <- map.factory(rout_SD19, vars == "Pods_collected")
+mf<-map(0)
+mf
+#3.247975
+
+#additive genetic variance for fitness
+vaw <- rout_SD19$sigma["Parental"]^2 * grad(map, 0)^2
+# get rid of name
+vaw <- as.numeric(vaw)
+vaw <- vaw * 4
+vaw
+#8.4646
+
+####FFTNS
+fftns <- vaw / mf
+fftns
+#2.606116
+
+# STANDARD ERRORS 
+map.factory.too <- function(rout, is.subsamp) {
+  stopifnot(inherits(rout, "reaster"))
+  stopifnot(is.logical(is.subsamp))
+  aout <- rout$obj
+  stopifnot(inherits(aout, "aster"))
+  nnode <- ncol(aout$x)
+  if (nnode != length(is.subsamp))
+    stop("length(is.subsamp) not the number of nodes in the aster graph")
+  alpha <- rout$alpha
+  ifit <- which(names(alpha) == "fit")
+  if (length(ifit) != 1)
+    stop("no fixed effect named fit")
+  # modmat for one individual. Taking the first row of modmat- there is one row for each individual
+  modmat <- rout$obj$modmat[1, , , drop = FALSE] #this only takes the first row 
+  # Set Yloc = 0
+  modmat[ , , "fit:yloc"] <- 0 
+  # set root = 1
+  root <- array(1, dim = dim(modmat)[1:2])
+  x <- aout$x[1, c(1:5)] # added
+  # return map function
+  function (balpha) {
+    stopifnot(is.numeric(balpha))
+    stopifnot(is.finite(balpha))
+    stopifnot(length(balpha) == 1 + length(alpha))
+    b <- balpha[1]
+    alpha <- balpha[-1]
+    alpha[ifit] <- alpha[ifit] + b
+    xi <- predict(
+      aout,
+      x = x, # added
+      newcoef = alpha,
+      modmat = modmat,
+      root = root,
+      model.type = "conditional",
+      is.always.parameter = TRUE
+    )
+    xi <- matrix(xi, ncol = nnode)
+    xi <- xi[,!is.subsamp, drop = FALSE]
+    mu <- apply(xi, 1, prod)
+    # mu is unconditional mean values for model without subsampling
+    # Here Yloc was set to zero so there in only one value in the Xi matrix 
+    mu[1]
+  }
+}
+
+map.too <- map.factory.too(rout_SD19, vars == "Pods_collected")
+
+balpha.hat <- c(0, rout_SD19$alpha)
+map.too(balpha.hat)
+all.equal(map(0), map.too(balpha.hat))
+
+library(numDeriv)
+
+#first and second derivatives
+g<-grad(map.too, balpha.hat)
+
+#calculates the nxn matrix
+h <- hessian(map.too, balpha.hat)
+
+#these are partial derivatives
+dmu.db <- g[1]
+dmu.dalpha <- g[-1]
+d2mu.db.dalpha <- h[1, -1]
+
+#give names to the estimators in our formulas.
+mu.hat <- map.too(balpha.hat)
+nu.hat <- rout_SD19$nu["Parental"]
+
+#calculations for the gradient vector of the FFTNS prediction with respect to the parameters of the models (fixed effects and variance components) 
+#zero removed
+dfftns <- c(- 4 * nu.hat * dmu.dalpha * dmu.db^2 / mu.hat^2 +
+8 * nu.hat * d2mu.db.dalpha / mu.hat, 4 * dmu.db^2 / mu.hat)
+
+#And apply the delta method.
+fftns.se <- t(dfftns) %*% fishinv %*% dfftns
+fftns.se <- sqrt(as.vector(fftns.se))
+fftns.se
+#1.734233
+
+#ADDITIVE GENETIC VARIANCE SE 
+#calculate the gradient vector VA(W) with respect to the parameters of the model using these formulas
+dvaw <- c(8 * nu.hat * d2mu.db.dalpha, 4 * dmu.db^2)
+
+#And then apply the delta method to get standard errors for this estimator
+vaw.se <- t(dvaw) %*% fishinv %*% dvaw
+vaw.se <- sqrt(as.vector(vaw.se))
+vaw.se
+#5.363273
+
+#MEAN FITNESS SE
+dmf <- c(dmu.dalpha, 0)
+mf.se <- t(dmf) %*% fishinv %*% dmf
+mf.se <- sqrt(as.vector(mf.se))
+mf.se
+#0.4681468
+```
+
+##PROGENY YEAR 2 
+###check distribution
+```{r}
+library(MASS)
+#total pods
+#negative binomial
+SDyr2_prog_flwr<-subset(SD_lifehist_19_b, surv_flwr>0)
+ hist(SDyr2_prog_flwr$Total_pods)
+
+SD2.prog.param <- fitdistr(SDyr2_prog_flwr$Total_pods, "negative binomial") 
+windows()
+hist(rnbinom(51, size =0.984, mu=15.843))
+ hist(rpois(51, lambda=15.843))
+alpha.SD2.prog<-round(SD2.prog.param$estimate[1],2)
+
+#total seeds 
+#negative binomial
+SDyr2_prog_pods<-subset(SD_lifehist_19_b, Pods_collected>0)
+hist(SDyr2_prog_pods$Total_seeds)
+SD2.prog.param3 <- fitdistr(SDyr2_prog_pods$Total_seeds, "negative binomial") 
+windows()
+hist(rnbinom(37, size =1.85 , mu=32.68))
+hist(rpois(37, lambda=32.68))
+alpha.SD2.prog.3<-round(SD2.prog.param3$estimate[1],2)
+```
+
+###aster set up
+```{r}
+###fixed effect aster model for progeny generation
+vars<-c("Germination","surv_flwr","Total_pods","Pods_collected","Total_seeds")
+
+#reshape to longform
+SD19_aster_prog <- reshape(SD_lifehist_19_b,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#Check that the reshape worked 
+nrow(SD19_aster_prog)
+nrow(SD_lifehist_19_b)*length(vars)
+
+#designate fitness variable
+fit<-grepl("Total_seeds", as.character(SD19_aster_prog$varb))
+fit<-as.numeric(fit)
+SD19_aster_prog$fit<-fit
+
+#check the correct variable is designated as the fitness variable 
+with(SD19_aster_prog, sort(unique(as.character(varb)[fit==0])))
+with(SD19_aster_prog, sort(unique(as.character(varb)[fit==1])))
+
+#Add a variable "root" where value is 1
+SD19_aster_prog <- data.frame(SD19_aster_prog, root=1)
+
+#fixed effect y location should be continuous 
+class(SD19_aster_prog$yloc)
+
+####Set graphical node and distribution 
+pred <- c(0,1,2,3,4)
+
+#fam is setting the distribution for each node.The subsampling distribution is binomial 
+fam<-c(1,1,2,1,2)
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-data.frame(pvars, vars, sapply(fam.default(), as.character)[fam])
+colnames(bar) <- c("pred", "succ", "fam")
+print(bar, right = FALSE, row.names = FALSE)
+```
+
+###Fixed effect aster model
+```{r}
+#using poisson distributions
+seeds.out_SD19_prog <- aster(resp ~ varb+ fit:(yloc), pred, fam, varb, id, root, data = SD19_aster_prog)  
+summary(seeds.out_SD19_prog, se.fit=TRUE)
+# 
+#                      Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)        -3.8843092  0.2595228 -14.967   <2e-16 ***
+# varbPods_collected -4.2372476  0.3525524 -12.019   <2e-16 ***
+# varbsurv_flwr      -9.7221827  0.7729706 -12.578   <2e-16 ***
+# varbTotal_pods      7.1241404  0.2624656  27.143   <2e-16 ***
+# varbTotal_seeds     5.9219548  0.2611382  22.677   <2e-16 ***
+# fit:yloc           -0.0004862  0.0003759  -1.294    0.196    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# get hypothetical individual
+SD_19_prog_hyp <- subset(SD19_aster_prog, id == 1)
+# set yloc to 0
+SD_19_prog_hyp$yloc <- 0
+# set resp to 1
+SD_19_prog_hyp$resp <- 1
+
+# predict conditional fitness estimates for this hypothetical individual
+SD_19_prog_hyp.p <- predict(seeds.out_SD19_prog, varvar = varb, idvar = id, root = root,
+  newdata = SD_19_prog_hyp, model.type = "conditional")
+
+# take the product of these conditional estimates, EXCEPT for the subsampling node
+mu.fit<-prod(SD_19_prog_hyp.p[-4])
+mu.fit
+#3.785148
+```
+
+####Fixed effect aster model for progeny fitness with negative binomial
+```{r}
+#give each node a number starting at zero
+pred <- c(0,1,2,3,4)
+
+#fam is setting the distribution for each node.the subsampling arrow is Binomial. 
+fam<-c(1,1,2,1,3)
+
+famlist <- list(fam.bernoulli(),fam.negative.binomial(size = alpha.SD2.prog), fam.negative.binomial(size = alpha.SD2.prog.3))
+sapply(famlist, as.character)[fam] 
+famlist
+
+#show graphical model
+seeds.out_SD19_prog <- aster(resp ~ varb+ fit:(yloc), pred, fam, famlist=famlist, varb, id, root, data = SD19_aster_prog)  
+summary(seeds.out_SD19_prog, se.fit=TRUE)
+#                      Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)        -3.8843092  0.2595228 -14.967  < 2e-16 ***
+# varbPods_collected  0.2745492  0.2911229   0.943    0.346    
+# varbsurv_flwr       2.7787300  0.5522670   5.031 4.87e-07 ***
+# varbTotal_pods      5.3013852  0.2602357  20.371  < 2e-16 ***
+# varbTotal_seeds     4.6670527  0.2598457  17.961  < 2e-16 ***
+# fit:yloc           -0.0002587  0.0002754  -0.939    0.347    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# get hypothetical individual
+SD_19_prog_hyp <- subset(SD19_aster_prog, id == 1)
+# set yloc to 0
+SD_19_prog_hyp$yloc <- 0
+# set resp to 1
+SD_19_prog_hyp$resp <- 1
+
+# predict conditional fitness estimates for this hypothetical individual
+SD_19_prog_hyp.p <- predict(seeds.out_SD19_prog, varvar = varb, idvar = id, root = root,
+  newdata = SD_19_prog_hyp, model.type = "conditional")
+
+# take the product of these conditional estimates, EXCEPT for the subsampling node
+mu.fit<-prod(SD_19_prog_hyp.p[-4])
+mu.fit
+# 3.724478
+```
+
+###Mean fitness and SE
+```{r}
+#this code follows the Switch-too-MR technical report 
+#use the poisson family designation 
+#conditional
+nnode <- length(vars)
+nind <- length(unique(SD_19_prog_hyp$id))
+nnode * nind == nrow(SD_19_prog_hyp)
+
+pout.cond <- predict(seeds.out_SD19_prog, newdata = SD_19_prog_hyp, varvar = varb, idvar = id, root = root, model.type = "conditional", is.always.parameter = TRUE, gradient= TRUE)
+xi<-pout.cond$fit
+
+class(xi)
+length(xi)==nind*nnode
+
+xi <- matrix(xi, nrow = nind)
+colnames(xi) <- vars
+#these are the conditional estimates of each node 
+xi
+
+#unconditional
+pout.unco<-predict(seeds.out_SD19_prog, newdata = SD_19_prog_hyp, varvar = varb, idvar = id, root = root, gradient=TRUE)
+mu<-pout.unco$fit
+mu <- matrix(mu, nrow = nind)
+colnames(mu) <- vars
+#these are the unconditional estimates of each node 
+mu
+
+is.seeds<-grep("Total_seeds", vars)
+is.pods<-grep("Total_pods", vars)
+
+is.seeds
+is.pods
+
+mu.pods<-mu[, is.pods]
+xi.seeds <- xi[ , is.seeds]
+mu.seeds <- mu.pods * xi.seeds
+mu.seeds
+# Total_pods 
+#  3.785148
+
+#make a  function
+foo <- function(x) {
+# x is xi and mu strung out as one vector
+xi <- x[1:length(xi)]
+mu <- x[- (1:length(xi))]
+xi <- matrix(xi, nrow = nind)
+mu <- matrix(mu, nrow = nind)
+mu.pods <- mu[ , is.pods]
+xi.seeds <- xi[ , is.seeds]
+mu.seeds <- mu.pods * xi.seeds
+}
+
+ximu <- c(xi, mu)
+all.equal(foo(ximu), mu.seeds)
+
+foo(ximu)
+mu.fit
+
+library(numDeriv)
+#R package numDeriv figures out the Jacobian matrix for this transformation
+#the Jacobian matrix for the transformation from the “coefficients” vector to the vector ximu
+jac.foo <- jacobian(foo, ximu)
+jac.ximu <- rbind(pout.cond$gradient, pout.unco$gradient)
+jac.total <- jac.foo %*% jac.ximu
+#Now the delta method says the variance-covariance matrix of all the fitnesses (the vector estimate mu.fit) is JI−1JT, where J is the overall Jacobian matrix jar.total and I is Fisher information for the “coefficients” vector
+V <- jac.total %*% solve(seeds.out_SD19_prog$fisher) %*% t(jac.total)
+#and the standard errors are square roots of the variances (the diagonal elements of V)
+se <- sqrt(diag(V))
+bar.pois <- cbind(mu.fit, se)
+colnames(bar.pois) <- c("Estimate", "SE")
+bar.pois
+#      Estimate        SE
+# [1,] 3.785148 0.6093929
+```

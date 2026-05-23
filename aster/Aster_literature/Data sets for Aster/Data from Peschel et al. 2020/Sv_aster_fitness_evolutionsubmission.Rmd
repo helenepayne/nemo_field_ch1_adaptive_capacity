@@ -1,0 +1,897 @@
+---
+title: "aster analyses"
+output: pdf_document
+---
+#LOAD LIBRARIES
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggpubr)
+library(aster)
+library(reshape2)
+```
+
+#SOIL MOISTURE
+##Load data
+```{r}
+SoilMoisture<-read.csv("~SoilProbe.csv")
+SoilMoisture <- SoilProbe
+```
+
+##Time series graph for soil moisture grouped by treatment
+```{r}
+# Convert Date to julian date to make graphing easier
+attach(SoilMoisture)
+Date <- as.Date(Date, "%m/%d/%y")
+Date<- as.character(Date)
+Date <- as.Date(Date, order = "ymd")
+Date.julian <- as.Date(Date, format = "%y%m%d")
+SoilMoisture$Date.julian <- format(Date.julian, "%j")
+SoilMoisture$Date.julian <-as.numeric(as.character(SoilMoisture$Date.julian))
+
+wc <- SoilMoisture %>%
+  group_by(Treatment, Date.julian) %>%
+  summarise(VWC.mean = mean(CVC))
+
+# read in exclusion dates data
+excludeDates <- read.csv("~exclusion_dates.csv")
+excludeDates <-exclusion_dates
+
+pd <- position_dodge(1)
+ggplot(wc, aes(x=Date.julian, y = VWC.mean, group=Treatment)) + 
+  geom_point(aes(fill = factor(Treatment)), size=2, shape = 21) +
+  geom_line(aes(x = Date.julian, y = VWC.mean), position=pd) + 
+  scale_fill_manual(values=c("black", "white"), name = "Treatment") +
+  scale_colour_manual(values = c("black","black")) +  
+  scale_x_continuous(breaks = c(170,180,190,200,210,220,230,240,250,260,270,280,290), expand=waiver()) + 
+  scale_y_continuous(breaks = c(0.05,0.10,0.15,0.20), limits = c(0.05, 0.20)) + 
+  ylab("\n Daily mean VWC") +
+  xlab("Julian date") +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = 'black', size = 1),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position='right',
+        axis.title.y = element_text(size=13, colour = "black"),
+        axis.text.y  = element_text(size=10, colour = "black"),
+        axis.title.x = element_text(size=13, colour = "black"),
+        axis.text.x  = element_text(size=10, colour = "black")) +
+  geom_point(data = excludeDates, aes(x = JulianDate, y = Y, group = NULL), shape = 8, color = "red")
+```
+
+#BOTH TREATMENTS ANALYSIS
+##Load data
+```{r, include=FALSE}
+SV<-read.csv("~fitness.csv")
+SV <-fitness
+
+SV$Plot<-as.factor(SV$Plot)
+SV$Dam<-as.factor(SV$Dam)
+SV$Sire <- as.factor(SV$Sire)
+SV$Treatment <- as.factor(SV$Treatment)
+SV$Fitness <-as.numeric(SV$Fitness)
+```
+ 
+##Reshape data
+```{r,include=FALSE}
+#convert data to long form. Dataframe is SV.  
+vars<-c("Survive_to_germination","Fitness")
+SV_aster <- melt(SV,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#this step checks that the reshape worked. The number of rows should be equal
+nrow(SV_aster)
+nrow(SV)*length(vars)
+```
+
+##Set up Aster
+```{r}
+vars<-c("Survive_to_germination","Fitness")
+SV_aster <- melt(SV,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+SV_aster <- melt(SV, id.vars = c( "Plot", "Treatment", "Dam", "Sire"), 
+                    measure.vars = vars, 
+                    variable.name = "varb", 
+                    value.name = "resp")
+
+#establish a "root" for the aster model
+SV_aster <- data.frame(SV_aster, root=1)
+names(SV_aster)
+
+#establish your predictor variables and assign them a distribution ("fam"). 1= bernoulli, 2=poisson
+pred <- c(0,1)
+fam<-c(1,2)
+
+#check that the distribution you assigned is correct
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+
+#adding levels to the graphical model
+level <- gsub("[0-9]", "", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+
+
+#creating the fitness variable of interest (here "fit", which corresponds to "Fitness", which is the number of seeds counted per plant)
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+```
+
+
+
+
+##Model comparison
+```{r}
+#################################################################
+#Likelihood ratio test for effect of Sire X Treatment interaction
+#################################################################
+#Model with sire, dam, treatment, and plot 
+#Sire and Dam are significant
+#Sire X Treatment is significant
+aster_full.m1 <- reaster(resp ~ varb + fit:(Treatment + Plot), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = SV_aster)
+summary(aster_full.m1)
+
+aster_full.m2 <- reaster(resp ~ varb + fit:(Treatment + Plot), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam, sirextrt= ~ 0 + fit:Sire:Treatment), pred, fam, varb, id, root, data = SV_aster)
+summary(aster_full.m2)
+
+anova(aster_full.m1, aster_full.m2)
+
+###############################################
+#Likelihood ratio test for effect of treatment
+###############################################
+#Treatment is not significant 
+mod3 <-aster(resp ~ varb+fit:Treatment, pred, fam, varb, id, root, data = SV_aster)
+mod4<-aster(resp ~ varb, pred, fam, varb, id, root, data = SV_aster)
+anova(mod4, mod3)
+
+#########################################
+#Likelihood ratio test for effect of plot
+##########################################
+#Compare model without plot to model with plot
+#Plot is significant
+mod5<-aster(resp~varb + fit:Treatment, pred = pred, fam = fam, varvar = varb, idvar = id, root = root, data = SV_aster)
+mod6 <-aster(resp ~ varb+fit:(Treatment+Plot), pred, fam, varb, id, root, data = SV_aster)
+anova(mod5, mod6)
+```
+
+##Fitness by treatment estimates
+```{r}
+#cannot just take the means here because the data is in aster form and you need it in aster form for correct stand errors 
+seeds.out <- aster(resp ~ varb + fit:Treatment, pred, fam, varb, id, root, data = SV_aster) 
+summary(seeds.out, show.graph = TRUE, info.tol= (1e-12))
+
+fred<- data.frame(Treatment=levels(SV_aster$Treatment), Survive_to_germination = 1, Fitness = 1, root=1)
+
+#reshape the "made up data" just as the actual data
+renewdata <- reshape(fred, varying = list(vars), 
+                     direction = "long", timevar = "varb",
+                     times = as.factor(vars), v.names = "resp")
+
+layer<- gsub("[0-9]", "", as.character(renewdata$varb))
+levels(renewdata$varb)
+
+#add layer to renewdata
+renewdata<- data.frame(renewdata, layer= layer)
+
+#totalseeds in new layer col of renewdata as numeric, called fit
+fit<- as.numeric(layer=="Fitness")
+
+#add fit to renewdata
+renewdata<- data.frame(renewdata, fit = fit)
+
+#rerun prediction of aout, with "made up" renewdata
+pout<- predict(seeds.out, newdata = renewdata, varvar = varb,
+               idvar = id, root = root, se.fit=T, info.tol = 1e-12)
+
+sapply(pout, class)
+sapply(pout, length)
+
+nnode<- length(vars)
+sally<- matrix(pout$fit, ncol = nnode)
+
+rownames(sally)<- unique(as.character(SV_aster$Treatment))
+colnames(sally)<- unique(as.character(SV_aster$varb))
+
+round(sally, 3)
+
+#Exected fitness for each plot
+herman<- sally[,grepl("Fitness", colnames(sally))]
+nTreatment<- nrow(fred)
+nnode<- length(vars)
+amat<- array(0, c(nTreatment, nnode, nTreatment))
+
+foo<- grepl("Fitness", vars)
+ for(k in 1:nTreatment) 
+   amat[k, foo, k]<- 1 
+
+pout.amat<- predict(seeds.out, newdata= renewdata, varvar= varb,
+                    idvar= id, root = root, se.fit=TRUE, amat = amat, info.tol = 1e-12)
+#these should match 
+herman 
+pout.amat$fit
+
+foo<- cbind(pout.amat$fit, pout.amat$se.fit)
+rownames(foo)<- as.character(fred$Treatment)
+colnames(foo)<- c("Expected_Fitness", "SE")
+colnames(foo)
+round(foo, 3) 
+
+#make the fitness estimates a dataframe
+foo_df <-data.frame(foo) 
+
+#make treatment a column for plotting
+foo_df <- cbind(data.frame(foo_df, row.names=NULL))
+row_names <-c("Full rain", "Rain reduction")
+
+#rename the column to treatment
+colnames(foo_df)[1] <- "Fitness"
+foo_df["Treatment"] <- row_names
+
+#plot fitness differences between full rain and reduced rain 
+ggplot(foo_df, aes(x=Treatment, y=Fitness)) +
+   geom_point(size=3, color="black") + 
+    geom_errorbar(aes(ymin=Fitness-SE, ymax=Fitness+SE))+ 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  ylab("\n Fitness (average seeds per plant)") +
+  xlab("Rain Treatment") +
+  theme(axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+  axis.text.x = element_text(face="bold"), axis.text.y = element_text(face="bold"))
+```
+
+#SUBSET DATA
+```{r}
+#reduced rain
+SV_D <-subset(SV, Treatment == "Drought")
+#full rain
+SV_A <-subset(SV, Treatment == "Ambient")
+```
+
+#RAIN REDUCTION ANALYSIS
+##Setting up data for aster
+```{r}
+#establish nodes of aster model that correspond to lifehistory stages
+vars<-c("Survive_to_germination", "Fitness")
+
+#reshape data to long format for aster
+SV_aster <- reshape(SV_D,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#Check that the reshape worked. These should be equal
+nrow(SV_aster)
+nrow(SV_D)*length(vars)
+
+#establish a "root" for the aster model
+SV_aster <- data.frame(SV_aster, root=1)
+
+#establish your predictor variables and assign them a distribution ("fam"). 1= bernoulli, 2=poisson
+pred <- c(0,1)
+fam<-c(1,2)
+
+#check that the distribution you assigned is correct
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the graphical model
+level <- gsub("[0-9]","", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+
+#Confirms the correct levels
+levels(SV_aster$level) 
+
+# creating the fitness variable of interest
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+```
+
+##Combine maternal and paternal into a single parental effect to be estimated
+```{r}
+#We estimated dam and sire effects in the same model as one term, parental variance, by equating the variance attributable to dam and sire effects, as noted in Falconer and Mackay (1996) example 10.4 (Sheth et al. 2018; Kulbaba et al. 2019).  
+modmat.sire <- model.matrix(~ 0 + fit:Sire, SV_aster)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, SV_aster)
+modmat.siredam <- cbind(modmat.sire,modmat.dam)
+```
+
+##Random effect aster model for rain reduction with combined paretal term
+```{r}
+#the combined sire and dam term modmat.siredam is significant
+rout_D <- reaster(resp ~ varb + fit:Plot, list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = SV_aster)
+sout_D <- summary(rout_D)
+sout_D
+```
+
+##model comparison for the effect of Plot
+```{r}
+rout_D2 <- reaster(resp ~ varb, list(Parental = ~ 0 + modmat.siredam), pred, fam, varb, id, root, data = SV_aster)
+anova(rout_D2, rout_D)
+```
+
+##Extract sire effects
+```{r}
+#Sire effects were extracted from the treatment-specific random effect aster models using a mapping function (Geyer et al. 2012). To convert breeding values to the mean value parameter scale the mapping function adds the coefficient of a fixed effect, in this analysis the plot with the median fitness value in each treatment, to each random parental effect. 
+
+bhat_D <- rout_D$b
+bhat.sire_D<- bhat_D[grep("Sire", names(bhat_D))]
+
+#should be the number of sire groups
+length(bhat.sire_D)
+
+#this is the prediction of fitness for each plot using a fixed effect aster model with the coefficients from the random effects aster model. We do this because we cannot predict off of a random effect 
+hoom <- predict(rout_D$obj, newcoef = rout_D$alpha)
+
+#transforms the results from above into two columns representing the two nodes
+hoom<- matrix(hoom, ncol =2) 
+
+#the second node is the fitness node so we call it out
+hoom<- hoom[ , 2] 
+
+#five numbers representing each plot
+unique(hoom)
+
+#this is a plant in the first plot
+hoom[1] 
+rout_D$alpha
+#picking the 1st plant in plot 1, which is 3rd in the rout$alpha order. This has the best conversion curve (line 254). Ncol=2 because the second node in the aster graphical model is the fitness node. alpha[3] because we are using the first plot which is third in the rout_D$alpha order.
+
+map <- function(b) {
+  stopifnot(length(b) == 1)
+  stopifnot(is.finite(b))
+  alpha <- rout_D$alpha
+  alpha[3] <- alpha[3] + b 
+  hoom <- predict(rout_D$obj, newcoef = alpha)
+  hoom <- matrix(hoom, ncol = 2)
+  return(hoom[1, 2])
+}
+
+#plot the curve
+fred<-Vectorize(map)
+curve(fred, from = -1 / 2, to = 1/2, xlab="b", ylab=expression(mu(b)))
+
+#use the mapping function "fred" to convert the sire effects from the canonical scale to the mean value parameter scale
+bhatD.sire.mu<- fred(bhat.sire_D)
+stem(bhatD.sire.mu)
+
+#plot the distribution of breeding values
+prob_den<-density(bhatD.sire.mu)
+plot(prob_den)
+```
+
+##Va(W) for rain reduction treatment
+```{r}
+#Aster modeling uses the delta method, employed by the predict function in R with Taylor Series linearization up to the first derivative, to create a linear function which converts estimates of VA(W) from the canonical scale to the mean value parameter scale (number of seeds produced per plant; Geyer and Shaw 2013).
+#adding standard error and gradient to the fitness estimates of each plot
+ 
+hoom<- predict(rout_D$obj, newcoef = rout_D$alpha, gradient=TRUE)
+
+#the result from hoom with only the gradient values
+goom <- hoom$gradient
+
+#The analysis in aster, like those in all generalized linear mixed models (glmm), proceeds on a transformed scale. To obtain estimates of VA(W) and on the original measurement scale, we applied a non-linear back transformation of the values using fitness values from the plot that had the median fitness value among the five plots in that treatment (as in Kulbaba et al. (2019)).
+#the median plot is plot 1 which is the third value from rout$alpha, hence why we use the number 3 to refer to the third column. The third column in the gradient represents the fitness estimate for plot 1 which is third in the rout$alpha order
+moom <- goom[, 3] 
+
+#fitness node is the second node, hence ncol=2
+moom<- matrix(moom, ncol=2) 
+
+#derivative of mean fitness for indiv in plot 1 
+#with respect to beta for plot 1, to which we added the sire effects in the mapping function
+#same value from 1-52 in the first column which is the gradient value. Column 2 is the fitness estimate for the first plot which is third in the rout$alpha order
+moom[1, 2]
+#should be parental
+names(rout_D$nu)
+
+#This is applying the delta method to the gradient values(moom[1,2]^2) to get the additive genetic variance for fitness (or its best surrogate in these data, the sire variance) transferred to the mean value parameter scale). The Jacobian is squared in the delta method, hence the ^2. We multiply by 4 since we used a paternal-half sibling pedigree. The covariance of half siblings =1/4 Va. 
+drought_Va<- 4*moom[1, 2]^2 * rout_D$nu[1]
+drought_Va 
+
+#standard error
+4*moom[2,2]^2*sout_D$nu["Parental","Std. Error"]
+```
+
+##Treatment mean fitness
+```{r}
+seeds.outD <- aster(resp ~ varb + Plot, pred, fam, varb, id, root, data = SV_aster) 
+summary(seeds.outD, show.graph = TRUE, info.tol= (1e-9))
+
+aout<- predict.aster(seeds.outD, info.tol= (1e-10), se.fit=TRUE)
+
+#equation when not including plot
+seeds.outD2 <-aster(resp~varb, pred, fam, varb, id, root, data=SV_aster)
+summary(seeds.outD2, info.tol = 1e-10)
+
+#Likelihood ratio test for the effect of plot 
+anova(seeds.outD2, seeds.outD)
+```
+
+##Plot Mean fitness
+```{r}
+SV_aster$Plot<-as.factor(SV_aster$Plot)
+SV_aster$Plot<-droplevels(SV_aster$Plot)
+
+fred<- data.frame(Plot=levels(SV_aster$Plot), Survive_to_germination = 1, Fitness = 1, root=1)
+
+#reshape the "made up data" just as the actual data
+renewdata <- reshape(fred, varying = list(vars),
+                     direction = "long", timevar = "varb",
+                     times = as.factor(vars), v.names = "resp")
+
+layer<- gsub("[0-9]", "", as.character(renewdata$varb))
+levels(renewdata$varb)
+
+#add layer to renewdata
+renewdata<- data.frame(renewdata, layer= layer)
+
+#totalseeds in new layer col of renewdata as numeric, called fit
+fit<- as.numeric(layer=="Fitness")
+
+#add fit to renewdata
+renewdata<- data.frame(renewdata, fit = fit)
+
+#rerun prediction of aout, with "made up" renewdata
+pout<- predict(seeds.outD, newdata = renewdata, varvar = varb,
+               idvar = id, root = root, se.fit=T, info.tol = 1e-12)
+
+sapply(pout, class)
+sapply(pout, length)
+
+nnode<- length(vars)
+sally<- matrix(pout$fit, ncol = nnode)
+
+rownames(sally)<- unique(as.character(SV_aster$Plot))
+colnames(sally)<- unique(as.character(SV_aster$varb))
+
+round(sally, 3)
+
+#Exected fitness for each plot
+herman<- sally[,grepl("Fitness", colnames(sally))]
+herman 
+
+nPlot<- nrow(fred)
+nnode<- length(vars)
+amat<- array(0, c(nPlot, nnode, nPlot))
+dim(amat)
+
+foo<- grepl("Fitness", vars)
+ for(k in 1:nPlot) 
+   amat[k, foo, k]<- 1 
+
+pout.amat<- predict(seeds.outD, newdata= renewdata, varvar= varb,
+                    idvar= id, root = root, se.fit=TRUE, amat = amat, info.tol = 1e-12)
+summary(pout.amat)
+
+#these should be the same 
+herman
+pout.amat$fit
+
+foo<- cbind(pout.amat$fit, pout.amat$se.fit)
+rownames(foo)<- as.character(fred$Plot)
+colnames(foo)<- c("Expected_Fitness", "SE")
+colnames(foo)
+round(foo, 3) 
+```
+
+##PREDICTIONS
+##Mean fitness for parental generation and predicted mean fitness of the progeny generation for the rain reduction treatment
+```{r}
+#this is the estimated mean fitness of the parental generation for plot  1
+W_estimates_D<- foo
+W_estimates_D
+
+#To calcualte delta W (change in mean fitness) for plot 1. Ignore SE
+pred_W_D<- drought_Va / W_estimates_D
+
+#this is the predicted change in fitness between the parental and progeny generation for plot 1. Ignore SE
+pred_W_D
+
+#Predicted fitness of progeny generation. For plot 1. Ignore SE
+Pred_progeny_W_D <- pred_W_D + W_estimates_D
+Pred_progeny_W_D
+```
+
+#FULL RAIN ANALYSIS
+##Setting up data for aster
+```{r}
+#designate nodes of aster model
+vars<-c("Survive_to_germination", "Fitness")
+#reshape data to long format
+SV_aster_A <- reshape(SV_A,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#check that the reshape worked
+nrow(SV_aster_A)
+nrow(SV_A)*length(vars)
+
+#make sure dam and sire are factors
+SV_aster_A$Dam<-as.factor(SV_aster_A$Dam)
+SV_aster_A$Sire <- as.factor(SV_aster_A$Sire)
+
+#add a root to the model
+SV_aster_A <- data.frame(SV_aster_A, root=1)
+
+#establish your predictor variables and assign them a distribution ("fam"). 1= bernoulli, 2=poisson
+pred <- c(0,1)
+fam<-c(1,2)
+
+#check the assigned distributions are correct
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the graphical model
+level <- gsub("[0-9]","", as.character(SV_aster_A$varb))
+SV_aster_A <- data.frame(SV_aster_A, level = as.factor(level))
+
+#Confirms the correct levels
+levels(SV_aster_A$level) 
+
+# creating the fitness variable of interest, here "Fitness"
+SV_aster_A$fit <- ifelse(SV_aster_A$varb == "Fitness", 1, 0)
+```
+
+##Combine maternal and paternal into a single parental effect
+```{r Va(W) for ambient, include=FALSE}
+#The sire term in the model with sire and dam is not significant but it is significant on its own so we used the combined parental term. 
+
+modmat.sire <- model.matrix(~ 0 + fit:Sire, SV_aster_A)
+modmat.dam <- model.matrix(~ 0 + fit:Dam, SV_aster_A)
+modmat.siredam <- cbind(modmat.sire,modmat.dam)
+```
+
+##Random effect aster model for full rain treatment
+```{r}
+rout <- reaster(resp ~ varb + fit:Plot, list(Parental = ~ 0 +modmat.siredam), pred, fam, varb, id, root, data = SV_aster_A)
+
+sout<-summary(rout)
+sout
+```
+
+##model comparison for significance of plot
+```{r}
+rout_b <- reaster(resp ~ varb, list(Parental = ~ 0 +modmat.siredam), pred, fam, varb, id, root, data = SV_aster_A)
+anova(rout_b, rout)
+```
+
+##Extract sire effects
+```{r}
+#Sire effects were extracted from the treatment-specific random effect aster models using a mapping function (Geyer et al. 2012). To convert breeding values to the mean value parameter scale the mapping function adds the coefficient of a fixed effect, in this analysis the plot with the median fitness value in each treatment, to each random parental effect. 
+
+bhat <- rout$b
+bhat.sire<- bhat[grep("Sire", names(bhat))]
+
+#Should be the number of sire groups
+length(bhat.sire)
+
+#This is the prediction of fitness for each plot using a fixed effect aster model with the coefficients from the random effects aster model. We do this because we cannot predict off of a random effect
+hoom <- predict(rout$obj, newcoef = rout$alpha)
+
+#Aster model has two nodes, hence ncol=2 
+#Transforms the results from above into two columns representing the two nodes
+hoom<- matrix(hoom, ncol =2)
+hoom<- hoom[ , 2]
+
+#Five vales for each of the five plots
+unique(hoom)
+
+#shows the order of variables  
+rout$alpha
+
+#This is a plant in second plot of unique(hoom), plot 3
+hoom[1] 
+
+#picking the 1st plant in plot 3, which is 3rd in the rout$alpha, order because it has the best conversion curve (line 516; conversion from the canonical scale to the mean value parameter scale) and is not a flat line. ncol=2 because there are two nodes in the graphical model and the second node is the fitnes node
+map <- function(b) {
+  stopifnot(length(b) == 1)
+  stopifnot(is.finite(b))
+  alpha <- rout$alpha
+  alpha[3] <- alpha[3] + b 
+  hoom <- predict(rout$obj, newcoef = alpha)
+  hoom <- matrix(hoom, ncol = 2) 
+  return(hoom[1, 2]) 
+}
+
+#plot the curve to see the distribution of breeding values
+fred<-Vectorize(map)
+curve(fred, from = -1 / 2, to = 1/2, xlab="b", ylab=expression(mu(b))) 
+
+#use the mapping function "fred" to convert the sire effects from the canonical scale to the mean value parameter scale 
+bhat.sire.mu_a<- fred(bhat.sire)
+prob_den<-density(bhat.sire.mu_a)
+plot(prob_den)
+```
+
+##Va(W) for full rain treatment
+```{r}
+#this is the prediction of fitness for each plot using a fixed effect aster model with the coefficients from the random effects aster model. We do this because we cannot predict off of a random effect 
+hoom<- predict(rout$obj, newcoef = rout$alpha, se.fit=TRUE, info.tol = 1e-10)
+goom <- hoom$gradient
+
+#the median plot is plot 3 which is the third value from rout$alpha
+moom<- goom[, 3] 
+
+#fitness node is the second node, hence ncol=2
+moom<- matrix(moom, ncol=2) 
+
+#derivative of mean fitness for indiv in plot 3 with respect to beta for plot 3, to which we added the sire effects in the mapping function. Same value from 1-52 in the first column which is the gradient value. Column 2 is the fitness estimate for the third plot which is third in the rout$alpha order.
+moom[1, 2]
+
+#should be parental
+names(rout$nu)
+
+#This is applying the delta method to the gradient values(moom[1,2]^2) to get the additive genetic variance for fitness (or its best surrogate in these data, the sire variance) transferred to the mean value parameter scale). The Jacobian is squared in the delta method, hence the ^2. We multiply by 4 since we used a paternal-half sibling pedigree. The covariance of half siblings =1/4 Va. 
+Ambient_Va<- 4*moom[1, 2]^2 * rout$nu[1]
+Ambient_Va 
+
+#standard error
+4*moom[1,2]^2*sout$nu["Parental","Std. Error"]
+```
+
+##Treatment mean fitness 
+```{r}
+seeds.outA <- aster(resp ~ varb + fit:Plot, pred, fam, varb, id, root, data = SV_aster_A) 
+summary(seeds.outA, show.graph = TRUE, info.tol= (1e-12))
+aout_A<- predict.aster(seeds.outA, se.fit=TRUE, info.tol = 1e-9)
+
+#formula not including plot
+seeds.outB<-aster(resp ~ varb, pred, fam, varb, id, root, data = SV_aster_A) 
+
+#likelihood ratio test for significance of plot
+anova(seeds.outB, seeds.outA)
+```
+
+##Plot mean fitness
+```{r}
+SV_aster_A$Plot<-as.factor(SV_aster_A$Plot)
+SV_aster_A$Plot<-droplevels(SV_aster_A$Plot)
+
+fred_A <- data.frame(Plot=levels(SV_aster_A$Plot), Survive_to_germination = 1, Fitness = 1, root=1)
+
+#reshape the "made up data" just as the actual data
+renewdata_A <- reshape(fred_A, varying = list(vars),
+                     direction = "long", timevar = "varb",
+                     times = as.factor(vars), v.names = "resp")
+
+layer<- gsub("[0-9]", "", as.character(renewdata_A$varb))
+levels(renewdata_A$varb)
+
+#add layer to renewdata
+renewdata_A<- data.frame(renewdata_A, layer= layer)
+
+#totalseeds in new layer col of renewdata as numeric, called fit
+fit<- as.numeric(layer=="Fitness")
+
+#add fit to renewdata
+renewdata_A<- data.frame(renewdata_A, fit = fit)
+
+#rerun prediction of aout, with "made up" renewdata
+pout_A<- predict(seeds.outA, newdata = renewdata_A, varvar = varb,
+               idvar = id, root = root, se.fit=T, info.tol = 1e-12)
+
+sapply(pout_A, class)
+sapply(pout_A, length)
+
+nnode<- length(vars)
+sally_A<- matrix(pout_A$fit, ncol = nnode)
+
+rownames(sally_A)<- unique(as.character(SV_aster_A$Plot))
+colnames(sally_A)<- unique(as.character(SV_aster_A$varb))
+
+round(sally_A, 3)
+
+#Exected fitness for each plot
+herman_A<- sally_A[,grepl("Fitness", colnames(sally_A))]
+herman_A 
+
+nPlot_A<- nrow(fred_A)
+nnode_A<- length(vars)
+amat_A<- array(0, c(nPlot_A, nnode_A, nPlot_A))
+
+foo_A<- grepl("Fitness", vars)
+ for(k in 1:nPlot_A) 
+   amat_A[k, foo_A, k]<- 1 
+
+pout.amat_A<- predict(seeds.outA, newdata= renewdata_A, varvar= varb,
+                    idvar= id, root = root, se.fit=TRUE, amat = amat_A, info.tol = 1e-12)
+summary(pout.amat_A)
+
+#these should be the same 
+herman_A
+pout.amat_A$fit
+
+foo_A<- cbind(pout.amat_A$fit, pout.amat_A$se.fit)
+
+rownames(foo_A)<- as.character(fred_A$Plot)
+colnames(foo_A)<- c("Expected_Fitness", "SE")
+colnames(foo_A)
+round(foo_A, 3) 
+```
+
+##PREDICTIONS
+##Mean fitness for parental generation and predicted mean fitness of the progeny generation for the rain reduction treatment
+```{r}
+#Prediction per plot, use plot 3
+#This is the estimated mean fitness of the parental generation
+W_estimates_A<- foo_A
+W_estimates_A
+
+#To calcualte delta W (change in mean fitness)
+#This is the predicted change in fitness between the parental and progeny generation
+pred_W_A<- Ambient_Va / W_estimates_A
+pred_W_A
+
+#Predicted fitness of progeny generation
+Pred_progeny_W_A <- pred_W_A + W_estimates_A
+Pred_progeny_W_A
+```
+
+#PLOTS
+##Median Plot fitness
+```{r}
+Med_fit<-read.csv("~SV_medianPlot_fitness.csv")
+
+#now plot and make only error bars for parental fitness and not progeny fitness
+pd <- position_dodge(0.1)
+ggplot(Med_fit, aes(x=Treatment,y=Fitness, shape=Generation, color=Treatment))+ 
+  scale_shape_manual(values = c(16, 21))+
+        scale_color_brewer(type="qual", palette =6, direction=-1) +
+         geom_errorbar(aes(ymin=Fitness-SE, ymax=Fitness+SE), width=0.1, position=pd) +
+         geom_point(position=pd, size=3)+
+          ylab('Lifetime Fitness (average number of seeds)')+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)), 
+        axis.text.x = element_text(face="bold"),
+        axis.text.y = element_text(face="bold"),
+        axis.title.x = element_blank(),
+        legend.key.size = unit(0.5, "cm"),
+        legend.title=element_text(size=10))+ 
+  labs(fill = "Generation") +
+  guides(colour=FALSE)  
+```
+
+##Sire spiders for full rain treatment
+```{r}
+#make new df for spider plot
+spiderPlot.df <- as.data.frame(bhat.sire.mu_a) 
+
+#take sire names from list
+spiderPlot.df$sire <- names(bhat.sire.mu_a) 
+spiderPlot.df$Treatment <- rep(c("Ambient"), times = 18)
+
+#rename to make readable
+names(spiderPlot.df) <- c("Fitness", "Sire", "Treatment") 
+```
+
+##Sire spiders for reduced rain treatment
+```{r}
+#make new df for spider plot
+spiderPlotD.df <- as.data.frame(bhatD.sire.mu)
+
+#take sire names from list
+spiderPlotD.df$sire <- names(bhatD.sire.mu) 
+spiderPlotD.df$Treatment <- rep(c("Drought"), times = 18)
+
+#rename to make readable
+names(spiderPlotD.df) <- c("Fitness", "Sire", "Treatment") 
+plot(spiderPlotD.df$Fitness)
+```
+
+##Sire spiders for reduced rain and full rain treatment with plot
+```{r}
+spiderPlot_all.df <- rbind(spiderPlot.df, spiderPlotD.df)
+sires.gg <- ggplot(spiderPlot_all.df, aes(x = Treatment, y = Fitness, group = Sire)) +
+  geom_line() +
+  theme_classic() +
+  ylab('Sire fitness breeding values') +
+  scale_x_discrete(labels=c("Full rain", "Reduced rain"))+
+  theme(
+    axis.text = element_text(face = "bold"), 
+    axis.title.x = element_blank(),
+    legend.position = ("none")
+  )
+sires.gg
+```
+
+##Plot fitness against full rain and reduced rain
+```{r}
+#find the correlation coefficient
+#to insert into graph use + stat_cor(method = "pearson") 
+cor(bhat.sire.mu_a, bhatD.sire.mu, method="pearson")
+
+#reshape data frame to long format 
+GxE.df<-reshape(spiderPlot_all.df, idvar= "Sire", timevar = "Treatment", direction= "wide")
+
+#now make the plot
+BV_Fit_corr.gg <-ggplot(GxE.df, aes(x=Fitness.Ambient, y=Fitness.Drought)) + 
+  geom_point(size=3, color="black") +
+  ylab("Rain reduction fitness breeding values") +
+  xlab("Full rain fitness breeding values") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.text = element_text(face = "bold"),
+        axis.line = element_line(colour = "Black")) 
+BV_Fit_corr.gg
+```
+
+#SIRE 21 REMOVED
+```{r}
+SV<-read.csv("~fitness.csv")
+
+#remove sire 21
+SV_21 <- droplevels(SV[!SV$Sire == '21',])
+
+SV_21$Plot<-as.factor(SV_21$Plot)
+SV_21$Dam<-as.factor(SV_21$Dam)
+SV_21$Sire <- as.factor(SV_21$Sire)
+SV_21$Treatment <- as.factor(SV_21$Treatment)
+SV_21$Fitness <-as.numeric(SV_21$Fitness)
+```
+
+##Reshape data
+```{r}
+#convert data to long form. Dataframe is SV.  
+vars<-c("Survive_to_germination","Fitness")
+SV_aster <- reshape(SV_21,varying = list(vars), direction = "long", timevar = "varb",times = as.factor(vars), v.names = "resp")
+
+#this step checks that the reshape worked. The number of rows should be equal
+nrow(SV_aster)
+nrow(SV_21)*length(vars)
+```
+
+##Set up Aster
+```{r}
+#establish a "root" for the aster model
+SV_aster <- data.frame(SV_aster, root=1)
+names(SV_aster)
+
+#establish your predictor variables and assign them a distribution ("fam"). 1= bernoulli, 2=poisson
+pred <- c(0,1)
+fam<-c(1,2)
+
+#check that the distribution you assigned is correct
+sapply(fam.default(), as.character)[fam]
+
+#show graphical model
+foo <- c("root", vars)
+pvars <- foo[pred +1]
+bar <-cbind(pvars, vars)
+colnames(bar) <- c("pred", "succ")
+
+#adding levels to the graphical model
+level <- gsub("[0-9]","", as.character(SV_aster$varb))
+SV_aster <- data.frame(SV_aster, level = as.factor(level))
+
+#Confirms the correct levels
+levels(SV_aster$level) 
+
+#creating the fitness variable of interest (here "fit", which corresponds to "Fitness", which is the number of seeds counted per plant)
+SV_aster$fit <- ifelse(SV_aster$varb == "Fitness", 1, 0)
+```
+
+##Model comparison
+```{r}
+##################################################################
+#Likelihood ratio test for effect of Sire X Treatment interaction
+##################################################################
+aster_full.m1 <- reaster(resp ~ varb + fit:(Treatment + Plot), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam), pred, fam, varb, id, root, data = SV_aster)
+summary(aster_full.m1)
+
+aster_full.m2 <- reaster(resp ~ varb + fit:(Treatment + Plot), list(Sire = ~ 0 + fit:Sire, Dam = ~ 0 + fit:Dam, sirextrt= ~ 0 + fit:Sire:Treatment), pred, fam, varb, id, root, data = SV_aster)
+summary(aster_full.m2)
+
+#Sire X Treatment is significant
+anova(aster_full.m1, aster_full.m2)
+```

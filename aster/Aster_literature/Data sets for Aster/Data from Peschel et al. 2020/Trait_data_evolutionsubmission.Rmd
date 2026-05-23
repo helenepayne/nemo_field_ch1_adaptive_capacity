@@ -1,0 +1,109 @@
+
+---
+title: "Sv_traitdata"
+output:
+  pdf_document: default
+  html_document: default
+---
+#Load Libraries
+```{r}
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(ggplot2)
+```
+
+#Load data
+```{r}
+ladata<-read.csv("~sla_fit.csv")
+
+#remove SLA values with a mass less than 10mg because it inflates the sample variance
+ladata=ladata[which(ladata[,8]>10),]
+```
+
+#Make factors
+```{r}
+attach(ladata)
+ladata$Plot<-as.factor(ladata$Plot)
+ladata$Sire<-as.factor(ladata$Sire)
+ladata$Dam<-as.factor(ladata$Dam)
+class(ladata$Dam)
+```
+
+#Subset data
+```{r}
+#reduced rain
+ladata_D <-subset(ladata, Treatment == "Drought")
+#full rain
+ladata_A <-subset(ladata, Treatment == "Ambient")
+``` 
+
+#Treatment Means
+```{r}
+SLA <- ladata %>%
+  group_by(Treatment)%>%
+  summarise(SLA.mean=mean(SLA_cm2_g), n=n(), sd=sd(SLA_cm2_g), se= sd/sqrt(n)) 
+
+SLA<-as.data.frame(SLA)
+```
+
+#Mixed effect models 
+```{r}
+#model comparision to determine significance of Sire x Treatment interaction
+SLA_mod1<-lmer(SLA_cm2_g~Treatment+(1|Sire)+(1|Dam) +(1|Sire:Treatment), data=ladata) 
+summary(SLA_mod1)
+
+SLA_mod2 <-lmer(SLA_cm2_g~Treatment+(1|Sire) + (1|Dam), data=ladata)
+summary(SLA_mod2)
+anova(SLA_mod1, SLA_mod2) 
+
+#Model comparison to determine significance of Treatment 
+SLA_mod3 <- lmer(SLA_cm2_g~(1|Sire) + (1|Dam), data=ladata)
+anova(SLA_mod3, SLA_mod2)
+```
+
+#Plot SLA breeding values between treatments
+```{r}
+SLA_BV<-read.csv("~SLA_BV.csv")
+
+BV_SLA_corr.gg<-ggplot(SLA_BV, aes(x=Full.Rain, y=Rain.Reduction)) + 
+  geom_point(size=3, color="black") +
+  ylab("Reduced Rain SLA breeding values") +
+  xlab("Full rain SLA breeding values") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "Black"),axis.text.x = element_text(face="bold"),axis.text.y = element_text(face="bold"))
+BV_SLA_corr.gg
+```
+
+#Plot SLA spiders
+```{r}
+#make SLA BV a data frame
+SLA_BV.df<-as.data.frame(SLA_BV)
+SLA_BV.df %>% 
+  rename(
+    Full_Rain = Full.Rain,
+    Reduced_Rain = Rain.Reduction
+    )
+
+#convert from wide to long for graphing 
+SLA_BV_long<-gather(SLA_BV.df, Treatment, SLA, Full.Rain:Rain.Reduction, factor_key=TRUE)
+
+BV_SLA.spider.gg <- ggplot(SLA_BV_long, aes(x=Treatment, y = SLA, group = Sire)) +
+  geom_line() +
+  theme_classic() +
+  ylab("Sire SLA breeding values") +
+  scale_x_discrete(labels=c("Full rain", "Reduced rain"))+
+  theme(
+    axis.text.y = element_text(face="bold"),
+    axis.text.x = element_text(face="bold"),
+    axis.title.x = element_blank(),
+    legend.position = ("none"))
+  
+BV_SLA.spider.gg
+```
+
+#arrange spiders and correlation together
+```{r}
+require(gridExtra)
+grid.arrange(BV_SLA.spider.gg,BV_SLA_corr.gg)
+```

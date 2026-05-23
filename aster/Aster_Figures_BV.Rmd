@@ -1,0 +1,1359 @@
+---
+title: "Aster_Figures"
+author: "Helen Payne"
+date: "2024-08-27"
+output: html_document
+---
+
+#Figure 1: Map of CA
+```{r}
+# Load libraries
+library(ggplot2)
+library(rnaturalearth)
+library(sf)
+library(ggspatial)
+library(tidyverse)
+library(scales)
+
+# Define site data
+locations <- data.frame(
+  name = c("Angelo Coast (AC)", "Bodega Bay (BB)", "Blue Oak (BO)", "Hastings Ranch (HR)"),
+  lat = c(39.71812, 38.31805, 37.3813, 36.37909),
+  lon = c(-123.65304, -123.07173, -121.73674, -121.56288)
+)
+
+# Custom color palette
+site_colors <- c(
+  "Angelo Coast (AC)" = "#E69F00",
+  "Bodega Bay (BB)" = "#009E73",
+  "Blue Oak (BO)" = "#56B4E9",
+  "Hastings Ranch (HR)" = "#D55E00"
+)
+
+# Convert to sf object
+sites_sf <- st_as_sf(locations, coords = c("lon", "lat"), crs = 4326)
+
+# Load California base map
+us_states <- ne_states(country = "united states of america", returnclass = "sf")
+california <- us_states[us_states$name == "California", ]
+
+# Plot
+p <- ggplot() +
+  geom_sf(data = california, fill = "gray95", color = "black") +
+  geom_sf(data = sites_sf, aes(color = name), size = 3, show.legend = FALSE) +
+  geom_sf_text(data = sites_sf, aes(label = name), nudge_x = 0.17, size = 4, hjust = 0) +
+  scale_color_manual(values = site_colors) +
+  annotation_scale(location = "bl", width_hint = 0.25) +
+  annotation_north_arrow(location = "tl", which_north = "true", 
+                         style = north_arrow_fancy_orienteering) +
+  coord_sf(xlim = c(-125.5, -119), ylim = c(35.5, 41)) +
+  labs(title = "Site Locations in California", x = "Longitude", y = "Latitude") +
+  theme_minimal(base_size = 14)
+
+p
+
+ggsave("figures/site_locations.jpeg", plot = p, width = 10, height = 6, dpi = 700)
+
+```
+
+
+#Figure 5: predicted and realized fitness
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+#load data
+fitness<-read.csv("processed_data/w_bothyears.csv")
+
+#make year a factor
+fitness$Year<-as.factor(fitness$Year)
+
+fitness_new <- fitness %>%
+  mutate(fitness_var = paste(Generation, Year)) %>%
+  mutate(Site = fct_relevel(Site, "Angelo Coast (AC)", "Bodega Bay (BB)", "Blue Oak (BO)", "Hastings Ranch (HR)"),
+         fitness_var = fct_relevel(fitness_var, "Parental estimate 2022", "Parental estimate 2023", "Progeny estimate 2023"))
+
+my.labels <- c("Gen 1, Yr 1", 
+               "Gen 1, Yr 2", 
+               "Gen 2, Yr 2")
+#plot
+ggplot(fitness_new, aes(x = fitness_var, y = Fitness)) +
+  geom_point(size=3) +
+  geom_errorbar(aes(ymin = Fitness - SE, ymax = Fitness + SE), width = 0.1) +
+  scale_x_discrete(position = "top", labels = my.labels) +
+  labs(x = "") +
+  geom_hline(yintercept=1, lty=2) +
+  ylab('Mean lifetime fitness')+
+  facet_wrap(~Site, nrow = 3, scales = "free_y")+
+   theme(panel.grid.major = element_blank(), 
+         panel.grid.minor = element_blank(), 
+         panel.background = element_blank(),
+         panel.border = element_rect(fill=NA),
+         axis.line.y = element_line(colour = "black"),
+         strip.text = element_text(face = "bold", size = 14),
+         axis.text.x = element_text(size=10),
+         axis.text.y = element_text(size=10),
+         axis.title.y = element_text(face="bold",size=13))
+
+#this is code to save the figure        
+ggsave("figures/yr1_yr2_fitness_prediction.jpg", device = "png", dpi = 1200)
+```
+
+
+#Figure 6: Breeding values
+```{r}
+#Figure 3: Breeding values and corelation coefficients
+###One site between years
+
+library(ggplot2)
+library(patchwork)
+
+#load data
+AC22_BV<-read.csv("processed_data/AC22_bhat.Donor.mu.csv")
+AC23_BV<-read.csv("processed_data/AC23_bhat.Donor.mu.csv")
+
+AC22_BV <- AC22_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_AC22" = bhat.Donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+AC23_BV <- AC23_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_AC23" = bhat.donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+AC_BV <- merge(AC22_BV, AC23_BV, by = "Donor", all = TRUE)
+
+#plot AC breeding values between years
+AC <- ggplot(AC_BV, aes(x=BV_AC22, y=BV_AC23)) +
+  geom_point(size=2, color="black") +
+  ylab("AC Year 2") +
+  xlab("AC Year 1") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(face="bold", color="black", size=8),
+        axis.text.y = element_text(face="bold", color="black", size=8),
+        axis.line.x = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.line.y = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.title.y = element_text(size=14, face="bold"),
+        axis.title.x = element_text(size=14, face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=0.4))  # Updated from size to linewidth
+
+# Display the plot
+print(AC)
+
+#calculate the correlation coefficient
+cor.test(AC_BV$BV_AC22, AC_BV$BV_AC23, method="pearson")
+cor.test(AC_BV$BV_AC22, AC_BV$BV_AC23, method="spearman", exact=FALSE)
+
+#load data
+BB22_BV<-read.csv("processed_data/BB22_bhat.Donor.mu.csv")
+BB23_BV<-read.csv("processed_data/BB23_bhat.Donor.mu.csv")
+
+BB22_BV <- BB22_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_BB22" = bhat.Donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+BB23_BV <- BB23_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_BB23" = bhat.donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+BB_BV <- merge(BB22_BV, BB23_BV, by = "Donor", all = TRUE)
+
+#plot BB breeding values between years
+BB <- ggplot(BB_BV, aes(x=BV_BB22, y=BV_BB23)) +
+  geom_point(size=2, color="black") +
+  ylab("BB Year 2") +
+  xlab("BB Year 1") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(face="bold", color="black", size=8),
+        axis.text.y = element_text(face="bold", color="black", size=8),
+        axis.line.x = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.line.y = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.title.y = element_text(size=14, face="bold"),
+        axis.title.x = element_text(size=14, face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=0.4))  # Updated from size to linewidth
+
+# Display the plot
+print(BB)
+
+#calculate the correlation coefficient
+cor.test(BB_BV$BV_BB22, BB_BV$BV_BB23, method="pearson")
+cor.test(BB_BV$BV_BB22, BB_BV$BV_BB23, method="spearman", exact=FALSE)
+
+#load data
+HR22_BV<-read.csv("processed_data/HR22_bhat.Donor.mu.csv")
+HR23_BV<-read.csv("processed_data/HR23_bhat.Donor.mu.csv")
+
+HR22_BV <- HR22_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_HR22" = bhat.Donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+HR23_BV <- HR23_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_HR23" = bhat.donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+HR_BV <- merge(HR22_BV, HR23_BV, by = "Donor", all = TRUE)
+
+#plot BB breeding values between years
+HR <- ggplot(HR_BV, aes(x=BV_HR22, y=BV_HR23)) +
+  geom_point(size=2, color="black") +
+  ylab("HR Year 2") +
+  xlab("HR Year 1") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(face="bold", color="black", size=8),
+        axis.text.y = element_text(face="bold", color="black", size=8),
+        axis.line.x = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.line.y = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.title.y = element_text(size=14, face="bold"),
+        axis.title.x = element_text(size=14, face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=0.4))  # Updated from size to linewidth
+
+# Display the plot
+print(HR)
+
+#calculate the correlation coefficient
+cor.test(HR_BV$BV_HR22, HR_BV$BV_HR23, method="pearson")
+cor.test(HR_BV$BV_HR22, HR_BV$BV_HR23, method="spearman", exact=FALSE)
+
+#load data
+BO22_BV<-read.csv("processed_data/BO22_bhat.Donor.mu.csv")
+BO23_BV<-read.csv("processed_data/BO23_bhat.Donor.mu.csv")
+
+BO22_BV <- BO22_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_BO22" = bhat.Donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+BO23_BV <- BO23_BV %>%
+  rename(Donor = X)  %>%
+  rename("BV_BO23" = bhat.donor.mu) %>%
+  mutate(Donor = str_extract(Donor, "\\d{3}$"))
+
+BO_BV <- merge(BO22_BV, BO23_BV, by = "Donor", all = TRUE)
+
+#plot BB breeding values between years
+BO <- ggplot(BO_BV, aes(x=BV_BO22, y=BV_BO23)) +
+  geom_point(size=2, color="black") +
+  ylab("BO Year 2") +
+  xlab("BO Year 1") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(face="bold", color="black", size=8),
+        axis.text.y = element_text(face="bold", color="black", size=8),
+        axis.line.x = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.line.y = element_line(color="black", linewidth=0.4),  # Updated from size to linewidth
+        axis.title.y = element_text(size=14, face="bold"),
+        axis.title.x = element_text(size=14, face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=0.4))  # Updated from size to linewidth
+
+
+# Display the plot
+print(BO)
+
+#calculate the correlation coefficient
+cor.test(BO_BV$BV_BO22, BO_BV$BV_BO23, method="pearson")
+cor.test(BO_BV$BV_BO22, BO_BV$BV_BO23, method="spearman", exact=FALSE)
+
+#combine plots using patchwork
+patchwork1<-((AC|BB)/(BO|HR))
+patchwork1
+
+#save plots
+ggsave("figures/BV_samesite.jpg", plot = patchwork1, width = 7, height = 5, units = "in", dpi = 1200)
+
+```
+
+##Supplementary Figures
+
+#Figure S4: Study site climate normals 
+```{r}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+library(tidyverse)
+library(raster)
+#library(rgdal) #old package no longer available
+library(ggplot2)
+library(sp)
+#library(rgeos) #archived, no longer available
+library(gridExtra)
+library(ggspatial)
+library(sf)
+# Install devtools if you don't have it already
+#install.packages("devtools")
+
+# Load the devtools package
+library(devtools)
+
+# Install the rnaturalearthhires package from GitHub
+#devtools::install_github("ropensci/rnaturalearthhires")
+
+library(rnaturalearth)
+
+# Load the temperature raster
+temprast <- raster("PRISM_tmean_30yr_normal.tif")
+
+# Get the USA shapefile from rnaturalearth package
+usa_sf <- ne_states(country = "united states of america", returnclass = "sf")
+
+# Transform CRS to a recent format (e.g., EPSG:4326)
+usa_sf <- st_transform(usa_sf, crs = 4326)
+
+# Select the states of interest for the tristate area
+tristate_sf <- usa_sf[usa_sf$name %in% ("California"),]
+
+# Crop the raster to the tristate area
+temprast_tristate <- crop(temprast, extent(tristate_sf))
+
+# Convert raster to data frame
+df <- as.data.frame(temprast_tristate, xy = TRUE)
+
+# Data for the points and labels
+labels_data <- data.frame(
+  x = c(-123.65261752533642, -123.07109117331942, -121.73678882741571, -121.5627953728642),
+  y = c(39.70791443219262,38.31820208912606, 37.38236329564739, 36.3793508087087),
+  label = c("AC", "BB", "BO", "HR")
+)
+# To add a line break within the label, you can use "\n" in the label text:
+labels_data$label[labels_data$label == "ML(home site)"] <- "ML\n(home site)"
+
+plot1 <- ggplot() +
+  geom_raster(data = df, aes(x = x, y = y, fill = PRISM_tmean_30yr_normal)) +
+  scale_fill_gradientn(colours = hcl.colors(8, "YlOrRd", rev = TRUE), na.value = "white") +
+  geom_sf(data = tristate_sf, fill = NA, color = "black") +
+  geom_point(data = labels_data, aes(x = x, y = y), shape = 16, size = 3, color = "black") +  # White points
+  geom_text(data = labels_data, aes(x = x, y = y, label = label),
+            nudge_y = c(-0.06, 0.05, 0.05, 0.05),  # Adjust vertical position for each label
+            vjust = c(-0.3, -0.35, -0.3, -0.3),   # Four values to match the four labels
+            size = 5, color = "black") +  # Larger and white text labels
+  labs(x = "Longitude", y = "Latitude", fill = expression(~Degree~C)) +
+  coord_sf(crs = 4326) +
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(colour = "black", size = 14),
+        axis.ticks = element_line(colour = "black", linewidth = 0.5),
+        axis.title = element_text(size = 16, face = "bold"),
+        panel.border = element_rect(fill = NA, colour = "black"))
+
+# Plot plot1
+print(plot1)
+
+
+# Load the precipitation raster
+preciprast <- raster("PRISM_ppt_30yr_normal.tif")
+
+# Crop the raster to the tristate area
+preciprast_tristate <- crop(preciprast, extent(tristate_sf))
+
+# Convert raster to data frame
+df_precip <- as.data.frame(preciprast_tristate, xy = TRUE)
+
+# Rename the columns
+names(df_precip) <- c("x", "y", "precip")
+
+# Plot the data
+plot2 <- ggplot() +
+  geom_raster(data = df_precip, aes(x = x, y = y, fill = precip), interpolate = TRUE) +
+  scale_fill_gradientn(colours = hcl.colors(8, "Blues", rev = TRUE), na.value = "white") +
+  geom_sf(data = tristate_sf, fill = NA, color = "black") +
+  geom_point(data = labels_data, aes(x = x, y = y), shape = 16, size = 3, color = "black") +  # Black points
+  geom_text(data = labels_data, aes(x = x, y = y, label = label),
+            nudge_y = c(-0.06, 0.05, 0.05, 0.05),  # Adjust vertical position for each label
+            vjust = c(-0.3, -0.35, -0.3, -0.3),   # Four values to match the four labels
+            size = 5, color = "black") +  # Larger and black text labels
+  labs(x = "Longitude", y = "Latitude", fill = "mm") +
+  coord_sf(crs = 4326) +
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(colour = "black", size = 14),
+        axis.ticks = element_line(colour = "black", linewidth = 0.5),
+        axis.title = element_text(size = 16, face = "bold"),
+        panel.border = element_rect(fill = NA, colour = "black"))
+
+# Combine plots into a single page using gridExtra
+grid.arrange(plot1, plot2, nrow = 2)
+
+
+# Save to a .png file
+ggsave("figures/combined_plots.jpg", arrangeGrob(plot1, plot2, nrow = 2), dpi = 1200, width = 9, height = 10)
+```
+
+#Figure S5a: Temp 2022
+```{r}
+# Load required libraries
+library(tidyverse)
+library(lubridate)
+library(scales)
+
+# Read the CSV file
+df <- read_csv("temp_precip/2022-temp.csv")
+
+# Convert from wide to long format
+df_long <- df %>%
+  pivot_longer(-Time, names_to = "Site", values_to = "Temperature")
+
+# Convert Date column to Date format
+df_long <- df_long %>%
+  mutate(Time = as.Date(Time))
+
+
+df_long$Site <- recode(df_long$Site,
+                       "Angelo South Meadow Air Temp Avg degC" = "Angelo Coast",
+                       "Bodega Air Temp Avg degC" = "Bodega Bay",
+                       "Blue Oak Ranch Air Temp Avg degC" = "Blue Oak",
+                       "Hastings Air Temp Avg degC" = "Hastings Ranch")
+
+# Plot
+p <- ggplot(df_long, aes(x = Time, y = Temperature, color = Site)) +
+  geom_line() +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "black", linewidth = 0.5) +
+  labs(title = "",
+       y = "Air Temperature (°C)",
+       x = "Date",
+       color = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "right") +  
+  scale_color_manual(
+    values = c("Angelo Coast" = "#E69F00", "Bodega Bay" = "#009E73", "Blue Oak" = "#56B4E9", "Hastings Ranch" = "#D55E00")
+  ) +
+  scale_x_date(labels = date_format("%Y-%m"), date_breaks = "1 month") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+
+ggsave("figures/2022-temperature-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+```
+
+
+#Figure S5b: Temp 2023
+```{r}
+# Read the CSV file
+df <- read_csv("temp_precip/2023-temp.csv")
+
+# Convert from wide to long format
+df_long <- df %>%
+  pivot_longer(-Time, names_to = "Site", values_to = "Temperature")
+
+# Convert Date column to Date format
+df_long <- df_long %>%
+  mutate(Time = as.Date(Time))
+
+
+df_long$Site <- recode(df_long$Site,
+                       "Angelo South Meadow Air Temp Avg degC" = "Angelo Coast",
+                       "Bodega Air Temp Avg degC" = "Bodega Bay",
+                       "Blue Oak Ranch Air Temp Avg degC" = "Blue Oak",
+                       "Hastings Air Temp Avg degC" = "Hastings Ranch")
+
+# Plot
+p <- ggplot(df_long, aes(x = Time, y = Temperature, color = Site)) +
+  geom_line() +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "black", linewidth = .5) +
+  labs(title = "",
+       y = "Air Temperature (°C)",
+       x = "Date",
+       color = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "right") +  
+  scale_color_manual(
+    values = c("Angelo Coast" = "#E69F00", "Bodega Bay" = "#009E73", "Blue Oak" = "#56B4E9", "Hastings Ranch" = "#D55E00")
+  ) +
+  scale_x_date(labels = date_format("%Y-%m"), date_breaks = "1 month") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+
+ggsave("figures/2023-temperature-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+```
+
+#Figure S6a: Precip 2022
+```{r}
+# Read the CSV file
+df <- read_csv("temp_precip/2022-rainfall.csv")
+
+# Convert from wide to long format
+df_long <- df %>%
+  pivot_longer(-Time, names_to = "Site", values_to = "Rainfall")
+
+# Convert Date column to Date format
+df_long <- df_long %>%
+  mutate(Time = as.Date(Time))
+
+
+df_long$Site <- dplyr::recode(df_long$Site,
+                       "Angelo South Meadow Rainfall Cumulative mm" = "Angelo Coast",
+                       "Bodega Rainfall Cumulative mm" = "Bodega Bay",
+                       "Blue Oak Ranch Rainfall Cumulative mm" = "Blue Oak",
+                       "Hastings Rainfall Cumulative mm" = "Hastings Ranch")
+
+# Plot
+p <- ggplot(df_long, aes(x = Time, y = Rainfall, color = Site)) +
+  geom_line() +
+  geom_hline(yintercept = 1000, linetype = "dashed", color = "black", linewidth = .5) +
+  labs(title = "",
+       y = "Cummulative Rainfall (mm)",
+       x = "Date",
+       color = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "right") +  
+  scale_color_manual(
+    values = c("Angelo Coast" = "#E69F00", "Bodega Bay" = "#009E73", "Blue Oak" = "#56B4E9", "Hastings Ranch" = "#D55E00")
+  ) +
+  scale_x_date(labels = date_format("%Y-%m"), date_breaks = "1 month") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+
+ggsave("figures/2022-precipitation-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+```
+
+#Figure S6b: Precip 2023
+```{r}
+# Read the CSV file
+df <- read_csv("temp_precip/2023-rainfall.csv")
+
+# Convert from wide to long format
+df_long <- df %>%
+  pivot_longer(-Time, names_to = "Site", values_to = "Rainfall")
+
+# Convert Date column to Date format
+df_long <- df_long %>%
+  mutate(Time = as.Date(Time))
+
+library(dplyr)
+
+df_long$Site <- dplyr::recode(df_long$Site,
+                              "Angelo South Meadow Rainfall Cumulative mm" = "Angelo Coast",
+                              "Bodega Rainfall Cumulative mm" = "Bodega Bay",
+                              "Blue Oak Ranch Rainfall Cumulative mm" = "Blue Oak",
+                              "Hastings Rainfall Cumulative mm" = "Hastings Ranch")
+
+# Plot
+p <- ggplot(df_long, aes(x = Time, y = Rainfall, color = Site)) +
+  geom_line() +
+  geom_hline(yintercept = 1000, linetype = "dashed", color = "black", linewidth = .5) +
+  labs(title = "",
+       y = "Rainfall Cumulative (mm)",
+       x = "Date",
+       color = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "right") +  
+  scale_color_manual(
+    values = c("Angelo Coast" = "#E69F00", "Bodega Bay" = "#009E73", "Blue Oak" = "#56B4E9", "Hastings Ranch" = "#D55E00")
+  ) +
+  scale_x_date(labels = date_format("%Y-%m"), date_breaks = "1 month") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+
+ggsave("figures/2023-precipitation-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+```
+
+#Figure S7: Spearman’s rank-order correlation
+```{r}
+# Load required package
+library(dplyr)
+library(broom)
+
+# Define function
+spearman_summary <- function(AC_BV, BB_BV, BO_BV, HR_BV) {
+  
+  # Combine all datasets into a named list
+  pop_list <- list(AC = AC_BV, BB = BB_BV, BO = BO_BV, HR = HR_BV)
+  
+  # Apply Spearman correlation to each dataset
+  results <- lapply(names(pop_list), function(pop) {
+    df <- pop_list[[pop]]
+    
+    # Check that columns exist
+    if(!all(c(paste0("BV_", pop, "22"), paste0("BV_", pop, "23")) %in% names(df))) {
+      stop(paste("Missing columns for", pop))
+    }
+    
+    # Run correlation
+    cor_result <- cor.test(df[[paste0("BV_", pop, "22")]],
+                           df[[paste0("BV_", pop, "23")]],
+                           method = "spearman",
+                           exact = FALSE)
+    
+    # Return as tibble
+    tibble(
+      Population = pop,
+      n = nrow(df),
+      r_s = cor_result$estimate,
+      p_value = cor_result$p.value
+    )
+  })
+  
+  # Combine results into a single tidy data frame
+  bind_rows(results)
+}
+
+spearman_results <- spearman_summary(AC_BV, BB_BV, BO_BV, HR_BV)
+print(spearman_results)
+
+AC <- ggplot(AC_BV, aes(x = rank(-BV_AC22), y = rank(-BV_AC23))) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray40", linetype = "dashed") +
+  geom_text(x = 1, y = 47, label = "r = 0.21", hjust = 0, vjust = 0, size = 4) +
+  labs(
+    x = "Parental Effects on W in 2022",
+    y = "Parental Effects on W in 2023") +
+  scale_x_continuous(limits = c(0, 50)) +
+  scale_y_continuous(limits = c(0, 50)) +
+  coord_fixed() + 
+  theme_bw(base_size = 10)
+
+BB <- ggplot(BB_BV, aes(x = rank(-BV_BB22), y = rank(-BV_BB23))) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray40", linetype = "dashed") +
+  geom_text(x = 1, y = 47, label = "r = 0.35", hjust = 0, vjust = 0, size = 4) +
+  labs(
+    x = "Parental Effects on W in 2022",
+    y = "Parental Effects on W in 2023") +
+  scale_x_continuous(limits = c(0, 50)) +
+  scale_y_continuous(limits = c(0, 50)) +
+  coord_fixed() + 
+  theme_bw(base_size = 10)
+
+BO <- ggplot(BO_BV, aes(x = rank(-BV_BO22), y = rank(-BV_BO23))) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray40", linetype = "dashed") +
+  geom_text(x = 1, y = 47, label = "r = -0.32", hjust = 0, vjust = 0, size = 4) +
+  labs(
+    x = "Parental Effects on W in 2022",
+    y = "Parental Effects on W in 2023" ) +
+  scale_x_continuous(limits = c(0, 50)) +
+  scale_y_continuous(limits = c(0, 50)) +
+  coord_fixed() +  
+  theme_bw(base_size = 10)
+
+HR <- ggplot(HR_BV, aes(x = rank(-BV_HR22), y = rank(-BV_HR23))) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray40", linetype = "dashed") +
+  geom_text(x = 1, y = 47, label = "r = 0.20", hjust = 0, vjust = 0, size = 4) +
+  labs(
+    x = "Parental Effects on W in 2022",
+    y = "Parental Effects on W in 2023"
+  ) +
+  scale_x_continuous(limits = c(0, 50)) +
+  scale_y_continuous(limits = c(0, 50)) +
+  coord_fixed() + 
+  theme_bw(base_size = 10)
+
+#combine plots using patchwork
+patchwork1<-((AC|BB)/(BO|HR))
+patchwork1
+
+#save plots
+ggsave("figures/spearman_correlation.jpg", plot = patchwork1, width = 7, height = 5, units = "in", dpi = 1200)
+```
+
+#Figure S8: Probability density distribution of parental breeding values
+```{r}
+library(ggplot2)
+library(patchwork)
+
+
+
+#load data
+AC22_BV<-read.csv("processed_data/AC22_bhat.Donor.mu.csv")
+AC23_BV<-read.csv("processed_data/AC23_bhat.Donor.mu.csv")
+
+#density Angelo Coast 2022
+density_AC_1<-ggplot(AC22_BV, aes(x=bhat.Donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="AC 2022")+ 
+        scale_x_continuous(limits=c(0,19))
+density_AC_1
+
+#density Angelo Coast 2023
+density_AC_2<-ggplot(AC23_BV, aes(x=bhat.donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="AC 2023")+ 
+        scale_x_continuous(limits=c(0,9))
+density_AC_2
+
+
+#load data
+BB22_BV<-read.csv("processed_data/BB22_bhat.Donor.mu.csv")
+BB23_BV<-read.csv("processed_data/BB23_bhat.Donor.mu.csv")
+
+#density Bodega Bay 2022
+density_BB_1<-ggplot(BB22_BV, aes(x=bhat.Donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="BB 2022")+ 
+        scale_x_continuous(limits=c(0,5))
+density_BB_1
+
+#density Bodega Bay 2023
+density_BB_2<-ggplot(BB23_BV, aes(x=bhat.donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="BB 2023")+ 
+        scale_x_continuous(limits=c(0,30))
+density_BB_2
+
+
+#load data
+BO22_BV<-read.csv("processed_data/BO22_bhat.Donor.mu.csv")
+BO23_BV<-read.csv("processed_data/BO23_bhat.Donor.mu.csv")
+
+#density Blue Oak 2022
+density_BO_1<-ggplot(BO22_BV, aes(x=bhat.Donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="BO 2022")+ 
+        scale_x_continuous(limits=c(0,4))
+density_BO_1
+
+#density Blue Oak 2023
+density_BO_2<-ggplot(BO23_BV, aes(x=bhat.donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="BO 2023")+ 
+        scale_x_continuous(limits=c(0,3))
+density_BO_2
+
+#load data
+HR22_BV<-read.csv("processed_data/HR22_bhat.Donor.mu.csv")
+HR23_BV<-read.csv("processed_data/HR23_bhat.Donor.mu.csv")
+
+#density Hastings Ranch 2022
+density_HR_1<-ggplot(HR22_BV, aes(x=bhat.Donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="HR 2022")+ 
+        scale_x_continuous(limits=c(0,17))
+density_HR_1
+
+density_HR_2<-ggplot(HR23_BV, aes(x=bhat.donor.mu))+
+  geom_density()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill="white",color = NA), 
+        axis.text.x = element_text(face="bold",size=12),
+        axis.title.x = element_text(face="bold", size=12),
+        axis.text.y = element_text(face="bold", size=12),
+        axis.title.y = element_text(face="bold", size=14),
+        legend.title=element_text(face="bold", size=14)) +
+        labs(y= "Probability density", x="HR 2023")+ 
+        scale_x_continuous(limits=c(0,8))
+density_HR_2
+
+
+#combine plots using patchwork
+patchwork<-(density_AC_1/density_AC_2|density_BB_1/density_BB_2|density_BO_1/density_BO_2|density_HR_1/density_HR_2)
+
+patchwork
+
+#code to save plot
+ggsave('figures/prob_density_BV.jpg', patchwork, device="jpg", dpi=1200)
+```
+
+
+#Figure S9?: Reaction Norms G1 2022 and G1 2023
+```{r}
+library(tidyverse)
+
+AC_long <- AC_BV %>%
+  select(Donor, BV_AC22, BV_AC23) %>%
+  pivot_longer(cols = c(BV_AC22, BV_AC23),
+               names_to = "Year",
+               values_to = "BV") %>%
+  mutate(Year = factor(Year,
+                       levels = c("BV_AC22","BV_AC23"),
+                       labels = c("2022","2023")))
+
+# categorize line direction to visualize G×E (up vs down)
+dirs <- AC_BV %>%
+  mutate(dir = case_when(
+    BV_AC23 > BV_AC22 ~ "increase",
+    BV_AC23 < BV_AC22 ~ "decrease",
+    TRUE ~ "no change"
+  )) %>% select(Donor, dir)
+
+AC_long <- AC_long %>% left_join(dirs, by = "Donor")
+
+# Reaction norm plot
+ac <- ggplot(AC_long, aes(x = Year, y = BV, group = Donor, color = dir)) +
+  geom_line(alpha = 0.45) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("increase" = "#2c7fb8",
+                                "decrease" = "#d95f0e",
+                                "no change" = "grey40"),
+                     name = "Change 22→23") +
+  labs(x = "AC", y = "EBVs for W") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+# Add mean trend
+ac_mean <- ac +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "line", linewidth = 1, color = "black") +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "point", size = 1, color = "black") + scale_y_continuous(limits = c(0, 20))
+
+print(ac_mean)
+
+#################
+library(tidyverse)
+
+BB_long <- BB_BV %>%
+  select(Donor, BV_BB22, BV_BB23) %>%
+  pivot_longer(cols = c(BV_BB22, BV_BB23),
+               names_to = "Year",
+               values_to = "BV") %>%
+  mutate(Year = factor(Year,
+                       levels = c("BV_BB22","BV_BB23"),
+                       labels = c("2022","2023")))
+
+# categorize line direction to visualize G×E (up vs down)
+dirs <- BB_BV %>%
+  mutate(dir = case_when(
+    BV_BB23 > BV_BB22 ~ "increase",
+    BV_BB23 < BV_BB22 ~ "decrease",
+    TRUE ~ "no change"
+  )) %>% select(Donor, dir)
+
+BB_long <- BB_long %>% left_join(dirs, by = "Donor")
+
+# Reaction norm plot
+bb <- ggplot(BB_long, aes(x = Year, y = BV, group = Donor, color = dir)) +
+  geom_line(alpha = 0.45) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("increase" = "#2c7fb8",
+                                "decrease" = "#d95f0e",
+                                "no change" = "grey40"),
+                     name = "Change 22→23") +
+  labs(x = "BB", y = "EBVs for W") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+# Add mean trend
+bb_mean <- bb +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "line", linewidth = 1, color = "black") +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "point", size = 1, color = "black") + scale_y_continuous(limits = c(0, 30))
+
+print(bb_mean)
+
+
+#################
+library(tidyverse)
+
+BO_long <- BO_BV %>%
+  select(Donor, BV_BO22, BV_BO23) %>%
+  pivot_longer(cols = c(BV_BO22, BV_BO23),
+               names_to = "Year",
+               values_to = "BV") %>%
+  mutate(Year = factor(Year,
+                       levels = c("BV_BO22","BV_BO23"),
+                       labels = c("2022","2023")))
+
+# categorize line direction to visualize G×E (up vs down)
+dirs <- BO_BV %>%
+  mutate(dir = case_when(
+    BV_BO23 > BV_BO22 ~ "increase",
+    BV_BO23 < BV_BO22 ~ "decrease",
+    TRUE ~ "no change"
+  )) %>% select(Donor, dir)
+
+BO_long <- BO_long %>% left_join(dirs, by = "Donor")
+
+# Reaction norm plot
+bo <- ggplot(BO_long, aes(x = Year, y = BV, group = Donor, color = dir)) +
+  geom_line(alpha = 0.45) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("increase" = "#2c7fb8",
+                                "decrease" = "#d95f0e",
+                                "no change" = "grey40"),
+                     name = "Change 22→23") +
+  labs(x = "BO", y = "EBVs for W") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom") 
+
+# Add mean trend
+bo_mean <- bo +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "line", linewidth = 1, color = "black") +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "point", size = 1, color = "black") + scale_y_continuous(limits = c(0, 3))
+
+print(bo_mean)
+
+
+#################
+library(tidyverse)
+
+HR_long <- HR_BV %>%
+  select(Donor, BV_HR22, BV_HR23) %>%
+  pivot_longer(cols = c(BV_HR22, BV_HR23),
+               names_to = "Year",
+               values_to = "BV") %>%
+  mutate(Year = factor(Year,
+                       levels = c("BV_HR22","BV_HR23"),
+                       labels = c("2022","2023")))
+
+# categorize line direction to visualize G×E (up vs down)
+dirs <- HR_BV %>%
+  mutate(dir = case_when(
+    BV_HR23 > BV_HR22 ~ "increase",
+    BV_HR23 < BV_HR22 ~ "decrease",
+    TRUE ~ "no change"
+  )) %>% select(Donor, dir)
+
+HR_long <- HR_long %>% left_join(dirs, by = "Donor")
+
+# Reaction norm plot
+hr <- ggplot(HR_long, aes(x = Year, y = BV, group = Donor, color = dir)) +
+  geom_line(alpha = 0.45) +
+  geom_point(size =1) +
+  scale_color_manual(values = c("increase" = "#2c7fb8",
+                                "decrease" = "#d95f0e",
+                                "no change" = "grey40"),
+                     name = "Change 22→23") +
+  labs(x = "HR", y = "EBVs for W") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+# Add mean trend
+hr_mean <- hr +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "line", linewidth = 1, color = "black") +
+  stat_summary(aes(group = 1),
+               fun = mean, geom = "point", size = 1, color = "black") + scale_y_continuous(limits = c(0, 17))
+
+print(hr_mean)
+
+#combine plots using patchwork
+reaction_norms<-((ac_mean|bb_mean)/(bo_mean|hr_mean))
+reaction_norms
+
+#save plots
+ggsave("figures/reaction_norms.jpg", plot = reaction_norms, width = 7, height = 5, units = "in", dpi = 1200)
+
+```
+
+###########END###################
+#Figure S8: Reaction Norms G1 2023 and G2 2023
+```{r}
+#Read in the data
+#load year 2 (2023) life history data for AC site
+AC_23 <- read_csv(here::here("data_sheets/compiled_sheets/AC_compiledsheet_full_2023.csv")) 
+
+#organize the data
+AC_23 <- AC_23 %>%
+  dplyr::select("Transect", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- AC_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+fam_wide <- fam_means %>%
+  pivot_wider(names_from = Gen, values_from = mean_W)
+
+head(fam_wide)
+
+ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
+  geom_line(alpha = 0.4) +
+  geom_point(size = 2) +
+  theme_bw(base_size = 12) +
+  labs(x = "Generation", y = "Mean fitness (filled seeds)",
+       title = "Reaction norms of Recipient families (AC 2023 G1 vs G2)") +
+  theme(axis.title = element_text(face = "bold"))
+
+##################
+
+#Read in the data
+#load year 2 (2023) life history data for BB site
+BB_23 <- read_csv(here::here("data_sheets/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
+
+#organize the data
+BB_23 <- BB_23 %>%
+  dplyr::select("Location", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- BB_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+fam_wide <- fam_means %>%
+  pivot_wider(names_from = Gen, values_from = mean_W)
+
+head(fam_wide)
+
+ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
+  geom_line(alpha = 0.4) +
+  geom_point(size = 2) +
+  theme_bw(base_size = 12) +
+  labs(x = "Generation", y = "Mean fitness (filled seeds)",
+       title = "Reaction norms of Recipient families (BB 2023 G1 vs G2)") +
+  theme(axis.title = element_text(face = "bold"))
+
+
+##################
+
+#Read in the data
+#load year 2 (2023) life history data for BO site
+BO_23 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
+
+#organize the data
+BO_23 <- BO_23 %>%
+  dplyr::select("Transect", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- BO_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+fam_wide <- fam_means %>%
+  pivot_wider(names_from = Gen, values_from = mean_W)
+
+head(fam_wide)
+
+ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
+  geom_line(alpha = 0.4) +
+  geom_point(size = 2) +
+  theme_bw(base_size = 12) +
+  labs(x = "Generation", y = "Mean fitness (filled seeds)",
+       title = "Reaction norms of Recipient families (BO 2023 G1 vs G2)") +
+  theme(axis.title = element_text(face = "bold"))
+
+##################
+
+#Read in the data
+#load year 2 (2023) life history data for HR site
+HR_23 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
+
+#organize the data
+HR_23 <- HR_23 %>%
+  dplyr::select("Transect", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- HR_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+fam_wide <- fam_means %>%
+  pivot_wider(names_from = Gen, values_from = mean_W)
+
+head(fam_wide)
+
+ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
+  geom_line(alpha = 0.4) +
+  geom_point(size = 2) +
+  theme_bw(base_size = 12) +
+  labs(x = "Generation", y = "Mean fitness (filled seeds)",
+       title = "Reaction norms of Recipient families (HR 2023 G1 vs G2)") +
+  theme(axis.title = element_text(face = "bold"))
+```
+```{r}
+#Read in the data
+#load year 2 (2023) life history data for AC site
+AC_23 <- read_csv(here::here("data_sheets/compiled_sheets/AC_compiledsheet_full_2023.csv")) 
+
+#organize the data
+AC_23 <- AC_23 %>%
+  dplyr::select("Transect", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- AC_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+#AC
+fam_wide <- tidyr::pivot_wider(fam_means,
+                               names_from = Gen,
+                               values_from = mean_W,
+                               names_prefix = "Gen")
+
+fam_wide <- fam_wide %>%
+  mutate(diff = GenG1 - GenG2)
+
+library(ggplot2)
+
+ggplot(fam_wide, aes(x = diff)) +
+  geom_histogram(color = "black", fill = "skyblue", bins = 20) +
+  theme_bw(base_size = 12) +
+  labs(x = "AC Difference in mean fitness (G1 2023 - G2 2023)",
+       y = "Number of families",
+       title = "Distribution of family-level differences in mean fitness")
+
+
+#######################
+#Read in the data
+#load year 2 (2023) life history data for BB site
+BB_23 <- read_csv(here::here("data_sheets/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
+
+#organize the data
+BB_23 <- BB_23 %>%
+  dplyr::select("Location", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- BB_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+#BB
+fam_wide <- tidyr::pivot_wider(fam_means,
+                               names_from = Gen,
+                               values_from = mean_W,
+                               names_prefix = "Gen")
+
+fam_wide <- fam_wide %>%
+  mutate(diff = GenG1 - GenG2)
+
+library(ggplot2)
+
+ggplot(fam_wide, aes(x = diff)) +
+  geom_histogram(color = "black", fill = "skyblue", bins = 20) +
+  theme_bw(base_size = 12) +
+  labs(x = "BB Difference in mean fitness (G1 2023 - G2 2023)",
+       y = "Number of families",
+       title = "Distribution of family-level differences in mean fitness")
+
+#######################
+#Read in the data
+#load year 2 (2023) life history data for BO site
+BO_23 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
+
+#organize the data
+BO_23 <- BO_23 %>%
+  dplyr::select("Transect", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- BO_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+#BO
+fam_wide <- tidyr::pivot_wider(fam_means,
+                               names_from = Gen,
+                               values_from = mean_W,
+                               names_prefix = "Gen")
+
+fam_wide <- fam_wide %>%
+  mutate(diff = GenG1 - GenG2)
+
+library(ggplot2)
+
+ggplot(fam_wide, aes(x = diff)) +
+  geom_histogram(color = "black", fill = "skyblue", bins = 20) +
+  theme_bw(base_size = 12) +
+  labs(x = "BO Difference in mean fitness (G1 2023 - G2 2023)",
+       y = "Number of families",
+       title = "Distribution of family-level differences in mean fitness")
+
+#######################
+#Read in the data
+#load year 2 (2023) life history data for HR site
+HR_23 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
+
+#organize the data
+HR_23 <- HR_23 %>%
+  dplyr::select("Transect", "Gen", "Donor", "Recipient", "sample_ID_SEG", "surv_to_flower", "F_plant", "total_fruits", "closed_fruits", "filled_seeds", "msm_all") %>%
+  mutate(F_plant = ifelse(F_plant == TRUE, 1, 0)) %>%
+  mutate(surv_to_flower = ifelse(total_fruits > 0 & surv_to_flower == 0, 1, surv_to_flower)) %>% #if a plant made fruits, it must have survived to flowering, so the survival indicator is changed from 0 to 1 
+  filter(Donor != "random seeds")
+
+fam_means <- HR_23 %>%
+  group_by(Gen, Recipient) %>%
+  summarise(mean_W = mean(filled_seeds, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+#BO
+fam_wide <- tidyr::pivot_wider(fam_means,
+                               names_from = Gen,
+                               values_from = mean_W,
+                               names_prefix = "Gen")
+
+fam_wide <- fam_wide %>%
+  mutate(diff = GenG1 - GenG2)
+
+library(ggplot2)
+
+ggplot(fam_wide, aes(x = diff)) +
+  geom_histogram(color = "black", fill = "skyblue", bins = 20) +
+  theme_bw(base_size = 12) +
+  labs(x = "HR Difference in mean fitness (G1 2023 - G2 2023)",
+       y = "Number of families",
+       title = "Distribution of family-level differences in mean fitness")
+
+```
+
+#Figure 6: Breeding Values (1 to 1 ratio)
+```{r}
+#--- AC ---
+AC <- ggplot(AC_BV, aes(x = BV_AC22, y = BV_AC23)) +
+  geom_point(size = 2, color = "black") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_fixed(xlim = c(0, 17), ylim = c(0, 17)) +
+  xlab("AC 2022") + ylab("AC 2023") +
+  annotate("text", x = 5.5, y = 0.5, label = "r = 0.28", hjust = 0, size = 3.5) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold", size = 8)
+  )
+
+#--- BB ---
+BB <- ggplot(BB_BV, aes(x = BV_BB22, y = BV_BB23)) +
+  geom_point(size = 2, color = "black") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_fixed(xlim = c(0, 31), ylim = c(0, 31)) +
+  xlab("BB 2022") + ylab("BB 2023") +
+  annotate("text", x = 21, y = 2, label = "r = 0.18", hjust = 0, size = 3.5) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold", size = 8)
+  )
+
+#--- HR ---
+HR <- ggplot(HR_BV, aes(x = BV_HR22, y = BV_HR23)) +
+  geom_point(size = 2, color = "black") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_fixed(xlim = c(0, 15), ylim = c(0, 15)) +
+  xlab("HR 2022") + ylab("HR 2023") +
+  annotate("text", x = 3.4, y = 0.3, label = "r = 0.18", hjust = 0, size = 3.5) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold", size = 8)
+  )
+
+#--- BO ---
+BO <- ggplot(BO_BV, aes(x = BV_BO22, y = BV_BO23)) +
+  geom_point(size = 2, color = "black") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_fixed(xlim = c(0, 2.5), ylim = c(0, 2.5)) +
+  xlab("BO 2022") + ylab("BO 2023") +
+  annotate("text", x = 3.3, y = 0.3, label = "r = -0.39", hjust = 0, size = 3.5) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold", size = 8)
+  )
+
+# Combine with patchwork: 2x2 grid
+final_plot <- (AC | BB) / (HR | BO)
+
+# View it
+print(final_plot)
+
+# Save it
+ggsave("figures/BV_2x2_grid_with_r.jpg", plot = final_plot, width = 6, height = 6, dpi = 1200)
+```
+
