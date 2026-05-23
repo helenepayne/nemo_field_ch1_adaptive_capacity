@@ -1,8 +1,6 @@
 # nemo_field_ch1_adaptive_capacity
 
-Chapter 1 analysis code for the *Nemophila menziesii* field
-experiment: aster modeling of fitness components and adaptive capacity in
-four California wildflower populations.
+Chapter 1 analysis code for a two-year field experiment with pedigreed seeds at four sites with natural populations of Baby Blue Eyes (*Nemophila menziesii* H. & A.), an annual wildflower native to western North America, to evaluate the correspondence between the magnitude of VA(W) and the realized adaptation in the following generation.
 
 Code is adapted from Peschel and Shaw 2024.
 
