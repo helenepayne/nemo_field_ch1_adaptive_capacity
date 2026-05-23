@@ -1,8 +1,10 @@
 # nemo_field_ch1_adaptive_capacity
 
-Chapter 1 analysis code for the *Nemophila menziesii* common-garden field
-experiment: aster modelling of fitness components and adaptive capacity across
-four California populations.
+Chapter 1 analysis code for the *Nemophila menziesii* field
+experiment: aster modeling of fitness components and adaptive capacity in
+four California wildflower populations.
+
+Code is adapted from Peschel and Shaw 2024.
 
 This repository contains only the Rmarkdown analysis scripts. The raw and
 processed data live in a Dryad data package (DOI
@@ -59,4 +61,4 @@ that monorepo.
 
 ## Authors
 
-Helen E. Payne, with contributions from Devin Gamble (compiling datasheets). See `git log` for per-file attribution.
+Helen E. Payne, with guidance from Dr. Anna Peschel and Dr. Susan Mazer, and contributions from Devin Gamble (compiling datasheets). See `git log` for per-file attribution.
