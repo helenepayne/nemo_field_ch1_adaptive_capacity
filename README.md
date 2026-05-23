@@ -21,9 +21,9 @@ that monorepo.
 ## Sister repositories
 
 - [nemo_field_ch2_evolvability](https://github.com/helenepayne/nemo_field_ch2_evolvability)
-  — Chapter 2 (Quercus + MCMC animal model).
+  — Chapter 2 (Evolvability, G matrices, using the MCMC animal model).
 - [nemo_field_ch3_phenotypic_plasticity](https://github.com/helenepayne/nemo_field_ch3_phenotypic_plasticity)
-  — Chapter 3.
+  — Chapter 3 (Plasticity in focal traits)
 
 ## Layout
 
