@@ -20,3 +20,6 @@ temp_precip/
 # Large rasters and PDFs that occasionally appear in this directory
 *.tif
 *.pdf
+
+# Data loaded by Rmds via here::here('data_sheets/compiled_sheets/...')
+data_sheets/
