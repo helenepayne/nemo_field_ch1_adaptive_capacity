@@ -16,8 +16,12 @@ figures/
 # package is published.
 data/
 processed_data/
+tables/
 
-# Large rasters and PDFs that occasionally appear in this directory
+# Large rasters, images, and PDFs that occasionally appear in this directory
 *.tif
 *.pdf
+*.jpg
+*.jpeg
+*.png
 

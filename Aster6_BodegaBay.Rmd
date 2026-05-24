@@ -18,7 +18,7 @@ library(stringr)
 library(here)
 
 #Read in the data
-BB_22 <- read_csv(here::here("data/compiled_sheets/BB_compiledsheet_full_2022.csv")) 
+BB_22 <- read_csv(here::here("data/BB_compiledsheet_full_2022.csv")) 
 
 #organize the data
 BB_22 <- BB_22 %>%
@@ -152,7 +152,7 @@ update_zeros <- function(df) {
 BB_22 <- update_zeros(BB_22)
 
 #save it
-write.csv(BB_22, "processed_data/BB_22.csv", row.names = FALSE)
+write.csv(BB_22, "tables/BB_22.csv", row.names = FALSE)
 ```
 
 ```{r}
@@ -622,7 +622,7 @@ bhat.Donor.mu<-as.data.frame(bhat.Donor.mu)
 dmap_BB22 <- Vectorize(function(b) numDeriv::grad(map, b))
 bhat.Donor.mu$BV_se_approx <- abs(dmap_BB22(bhat.Donor)) *
   rout_BB22_2$sigma["Parental"]
-write.csv(bhat.Donor.mu, "processed_data/BB22_bhat.Donor.mu.csv")
+write.csv(bhat.Donor.mu, "tables/BB22_bhat.Donor.mu.csv")
 
 #plot the distribution of breeding values
 # Extract the numeric column from bhat.Donor.mu
@@ -649,7 +649,7 @@ W
 # Bodega Bay Generation 1 2023
 ```{r}
 #load year 2 (2023) life history data for BB site
-BB_23 <- read_csv(here::here("data/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
+BB_23 <- read_csv(here::here("data/BB_compiledsheet_full_2023.csv")) 
 
 #organize the data
 BB_23 <- BB_23 %>%
@@ -1239,7 +1239,7 @@ bhat.donor.mu<-as.data.frame(bhat.donor.mu)
 dmap_BB23 <- Vectorize(function(b) numDeriv::grad(map, b))
 bhat.donor.mu$BV_se_approx <- abs(dmap_BB23(bhat.donor)) *
   rout_BB23_2$sigma["Parental"]
-write.csv(bhat.donor.mu, "processed_data/BB23_bhat.Donor.mu.csv")
+write.csv(bhat.donor.mu, "tables/BB23_bhat.Donor.mu.csv")
 ```
 
 
@@ -1584,8 +1584,8 @@ site_code <- sub("Aster6_([A-Za-z]+)\\.Rmd", "\\1",
 site_map <- c(Angelo="AC", BlueOak="BO", BodegaBay="BB", Hastings="HR")
 site <- site_map[site_code]
 
-bv22_path <- paste0("processed_data/", site, "22_bhat.Donor.mu.csv")
-bv23_path <- paste0("processed_data/", site, "23_bhat.donor.mu.csv")
+bv22_path <- paste0("tables/", site, "22_bhat.Donor.mu.csv")
+bv23_path <- paste0("tables/", site, "23_bhat.donor.mu.csv")
 
 bv22 <- read.csv(bv22_path)
 bv23 <- read.csv(bv23_path)

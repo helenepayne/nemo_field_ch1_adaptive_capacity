@@ -16,7 +16,7 @@ library(stringr)
 library(here)
 
 #Read in the data
-HR_22<- read_csv(here::here("data/compiled_sheets/HR_compiledsheet_full_2022.csv")) 
+HR_22<- read_csv(here::here("data/HR_compiledsheet_full_2022.csv")) 
 
 #organize the data
 HR_22 <- HR_22 %>%
@@ -149,7 +149,7 @@ update_zeros <- function(df) {
 # Apply the function to the dataset
 HR_22 <- update_zeros(HR_22)
 
-write.csv(HR_22, "processed_data/HR_22.csv", row.names = FALSE)
+write.csv(HR_22, "tables/HR_22.csv", row.names = FALSE)
 ```
 
 ```{r}
@@ -584,7 +584,7 @@ bhat.Donor.mu<-as.data.frame(bhat.Donor.mu)
 dmap_HR22 <- Vectorize(function(b) numDeriv::grad(map, b))
 bhat.Donor.mu$BV_se_approx <- abs(dmap_HR22(bhat.Donor)) *
   rout_HR22_2$sigma["Parental"]
-write.csv(bhat.Donor.mu, "processed_data/HR22_bhat.Donor.mu.csv")
+write.csv(bhat.Donor.mu, "tables/HR22_bhat.Donor.mu.csv")
 
 #plot the distribution of breeding values
 # Extract the numeric column from bhat.Donor.mu
@@ -611,7 +611,7 @@ W
 # Hastings Ranch Generation 1 2023
 ```{r}
 #load year 2 (2023) life history data for HR site
-HR_23 <- read_csv(here::here("data/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
+HR_23 <- read_csv(here::here("data/HR_compiledsheet_full_2023.csv")) 
 
 #organize the data
 HR_23 <- HR_23 %>%
@@ -1099,7 +1099,7 @@ bhat.donor.mu<-as.data.frame(bhat.donor.mu)
 dmap_HR23 <- Vectorize(function(b) numDeriv::grad(map, b))
 bhat.donor.mu$BV_se_approx <- abs(dmap_HR23(bhat.donor)) *
   rout_HR23_2$sigma["Parental"]
-write.csv(bhat.donor.mu, "processed_data/HR23_bhat.Donor.mu.csv")
+write.csv(bhat.donor.mu, "tables/HR23_bhat.Donor.mu.csv")
 ```
 
 # Hastings Ranch Generation 2 2023
@@ -1419,8 +1419,8 @@ site_code <- sub("Aster6_([A-Za-z]+)\\.Rmd", "\\1",
 site_map <- c(Angelo="AC", BlueOak="BO", BodegaBay="BB", Hastings="HR")
 site <- site_map[site_code]
 
-bv22_path <- paste0("processed_data/", site, "22_bhat.Donor.mu.csv")
-bv23_path <- paste0("processed_data/", site, "23_bhat.donor.mu.csv")
+bv22_path <- paste0("tables/", site, "22_bhat.Donor.mu.csv")
+bv23_path <- paste0("tables/", site, "23_bhat.donor.mu.csv")
 
 bv22 <- read.csv(bv22_path)
 bv23 <- read.csv(bv23_path)

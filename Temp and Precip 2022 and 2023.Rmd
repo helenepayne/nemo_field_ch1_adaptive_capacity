@@ -16,7 +16,7 @@ library(scales)
 2022 Temp
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2022-temp.csv")
+df <- read_csv("data/2022-temp.csv")
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -52,14 +52,14 @@ p <- ggplot(df_long, aes(x = Time, y = Temperature, color = Site)) +
 p
 
 
-ggsave("2022-temperature-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+ggsave("figures/2022-temperature-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
 ```
 
 
 2023 Temp
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2023-temp.csv")
+df <- read_csv("data/2023-temp.csv")
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -95,13 +95,13 @@ p <- ggplot(df_long, aes(x = Time, y = Temperature, color = Site)) +
 p
 
 
-ggsave("2023-temperature-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+ggsave("figures/2023-temperature-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
 ```
 
 2022 Precip
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2022-rainfall.csv")
+df <- read_csv("data/2022-rainfall.csv")
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -137,13 +137,13 @@ p <- ggplot(df_long, aes(x = Time, y = Rainfall, color = Site)) +
 p
 
 
-ggsave("2022-precipitation-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
+ggsave("figures/2022-precipitation-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
 ```
 
 2023 Precip
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2023-rainfall.csv")
+df <- read_csv("data/2023-rainfall.csv")
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -179,55 +179,6 @@ p <- ggplot(df_long, aes(x = Time, y = Rainfall, color = Site)) +
 p
 
 
-ggsave("2023-precipitation-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
-```
-
-Map of CA
-```{r}
-# Load libraries
-library(ggplot2)
-library(rnaturalearth)
-library(sf)
-library(ggspatial)
-
-# Define site data
-locations <- data.frame(
-  name = c("Angelo Coast (AC)", "Bodega Bay (BB)", "Blue Oak (BO)", "Hastings Ranch (HR)"),
-  lat = c(39.71812, 38.31805, 37.3813, 36.37909),
-  lon = c(-123.65304, -123.07173, -121.73674, -121.56288)
-)
-
-# Custom color palette
-site_colors <- c(
-  "Angelo Coast (AC)" = "#E69F00",
-  "Bodega Bay (BB)" = "#009E73",
-  "Blue Oak (BO)" = "#56B4E9",
-  "Hastings Ranch (HR)" = "#D55E00"
-)
-
-# Convert to sf object
-sites_sf <- st_as_sf(locations, coords = c("lon", "lat"), crs = 4326)
-
-# Load California base map
-us_states <- ne_states(country = "united states of america", returnclass = "sf")
-california <- us_states[us_states$name == "California", ]
-
-# Plot
-p <- ggplot() +
-  geom_sf(data = california, fill = "gray95", color = "black") +
-  geom_sf(data = sites_sf, aes(color = name), size = 3, show.legend = FALSE) +
-  geom_sf_text(data = sites_sf, aes(label = name), nudge_x = 0.17, size = 4, hjust = 0) +
-  scale_color_manual(values = site_colors) +
-  annotation_scale(location = "bl", width_hint = 0.25) +
-  annotation_north_arrow(location = "tl", which_north = "true", 
-                         style = north_arrow_fancy_orienteering) +
-  coord_sf(xlim = c(-125.5, -119), ylim = c(35.5, 41)) +
-  labs(title = "Site Locations in California", x = "Longitude", y = "Latitude") +
-  theme_minimal(base_size = 14)
-
-p
-
-ggsave("site_locations.jpeg", plot = p, width = 10, height = 6, dpi = 700)
-
+ggsave("figures/2023-precipitation-by-site.jpg", plot = p, width = 10, height = 6, dpi = 1000)
 ```
 
