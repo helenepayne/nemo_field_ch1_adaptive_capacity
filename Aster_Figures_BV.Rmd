@@ -63,7 +63,7 @@ library(tidyverse)
 library(ggplot2)
 
 #load data
-fitness<-read.csv("processed_data/w_bothyears.csv")
+fitness<-read.csv(here::here("data/w_bothyears.csv"))
 
 #make year a factor
 fitness$Year<-as.factor(fitness$Year)
@@ -301,7 +301,7 @@ library(devtools)
 library(rnaturalearth)
 
 # Load the temperature raster
-temprast <- raster("PRISM_tmean_30yr_normal.tif")
+temprast <- raster(here::here("data/PRISM_tmean_30yr_normal.tif"))
 
 # Get the USA shapefile from rnaturalearth package
 usa_sf <- ne_states(country = "united states of america", returnclass = "sf")
@@ -351,7 +351,7 @@ print(plot1)
 
 
 # Load the precipitation raster
-preciprast <- raster("PRISM_ppt_30yr_normal.tif")
+preciprast <- raster(here::here("data/PRISM_ppt_30yr_normal.tif"))
 
 # Crop the raster to the tristate area
 preciprast_tristate <- crop(preciprast, extent(tristate_sf))
@@ -398,7 +398,7 @@ library(lubridate)
 library(scales)
 
 # Read the CSV file
-df <- read_csv("temp_precip/2022-temp.csv")
+df <- read_csv(here::here("data/2022-temp.csv"))
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -441,7 +441,7 @@ ggsave("figures/2022-temperature-by-site.jpg", plot = p, width = 10, height = 6,
 #Figure S5b: Temp 2023
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2023-temp.csv")
+df <- read_csv(here::here("data/2023-temp.csv"))
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -483,7 +483,7 @@ ggsave("figures/2023-temperature-by-site.jpg", plot = p, width = 10, height = 6,
 #Figure S6a: Precip 2022
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2022-rainfall.csv")
+df <- read_csv(here::here("data/2022-rainfall.csv"))
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -525,7 +525,7 @@ ggsave("figures/2022-precipitation-by-site.jpg", plot = p, width = 10, height = 
 #Figure S6b: Precip 2023
 ```{r}
 # Read the CSV file
-df <- read_csv("temp_precip/2023-rainfall.csv")
+df <- read_csv(here::here("data/2023-rainfall.csv"))
 
 # Convert from wide to long format
 df_long <- df %>%
@@ -839,6 +839,7 @@ ggsave('figures/prob_density_BV.jpg', patchwork, device="jpg", dpi=1200)
 #Figure S9?: Reaction Norms G1 2022 and G1 2023
 ```{r}
 library(tidyverse)
+select <- dplyr::select
 
 AC_long <- AC_BV %>%
   select(Donor, BV_AC22, BV_AC23) %>%

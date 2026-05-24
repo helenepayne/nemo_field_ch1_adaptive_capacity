@@ -9,13 +9,13 @@
 # Knitr outputs
 *_files/
 *_cache/
+figures/
 
 # Data: not version-controlled. Fetched from Dryad on first run via
 # fetch_dryad.R, or populated manually from a private copy until the Dryad
 # package is published.
 data/
 processed_data/
-temp_precip/
 
 # Large rasters and PDFs that occasionally appear in this directory
 *.tif
