@@ -32,6 +32,9 @@ that monorepo.
 ├── Temp and Precip 2022 and 2023.Rmd
 ├── fetch_dryad.R          # helper to download data from Dryad
 ├── data/                  # populated at runtime (gitignored)
+├── figures/               # plot outputs (gitignored)
+├── tables/                # CSV outputs from analyses (gitignored)
+├── processed_data/        # aster model .rdata outputs (gitignored)
 └── .mailmap               # unified author identities
 ```
 
@@ -54,7 +57,14 @@ that monorepo.
    ├── BO_compiledsheet_full_2022.csv
    ├── BO_compiledsheet_full_2023.csv
    ├── HR_compiledsheet_full_2022.csv
-   └── HR_compiledsheet_full_2023.csv
+   ├── HR_compiledsheet_full_2023.csv
+   ├── 2022-temp.csv
+   ├── 2023-temp.csv
+   ├── 2022-rainfall.csv
+   ├── 2023-rainfall.csv
+   ├── w_bothyears.csv
+   ├── PRISM_tmean_30yr_normal.tif
+   └── PRISM_ppt_30yr_normal.tif
    ```
 
 4. Knit any of `Aster6_*.Rmd`.
