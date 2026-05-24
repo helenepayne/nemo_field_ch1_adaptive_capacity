@@ -1025,7 +1025,7 @@ ggsave("figures/reaction_norms.jpg", plot = reaction_norms, width = 7, height = 
 ```{r}
 #Read in the data
 #load year 2 (2023) life history data for AC site
-AC_23 <- read_csv(here::here("data_sheets/compiled_sheets/AC_compiledsheet_full_2023.csv")) 
+AC_23 <- read_csv(here::here("data/compiled_sheets/AC_compiledsheet_full_2023.csv")) 
 
 #organize the data
 AC_23 <- AC_23 %>%
@@ -1056,7 +1056,7 @@ ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
 
 #Read in the data
 #load year 2 (2023) life history data for BB site
-BB_23 <- read_csv(here::here("data_sheets/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
+BB_23 <- read_csv(here::here("data/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
 
 #organize the data
 BB_23 <- BB_23 %>%
@@ -1088,7 +1088,7 @@ ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
 
 #Read in the data
 #load year 2 (2023) life history data for BO site
-BO_23 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
+BO_23 <- read_csv(here::here("data/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
 
 #organize the data
 BO_23 <- BO_23 %>%
@@ -1119,7 +1119,7 @@ ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
 
 #Read in the data
 #load year 2 (2023) life history data for HR site
-HR_23 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
+HR_23 <- read_csv(here::here("data/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
 
 #organize the data
 HR_23 <- HR_23 %>%
@@ -1149,7 +1149,7 @@ ggplot(fam_means, aes(x = Gen, y = mean_W, group = Recipient)) +
 ```{r}
 #Read in the data
 #load year 2 (2023) life history data for AC site
-AC_23 <- read_csv(here::here("data_sheets/compiled_sheets/AC_compiledsheet_full_2023.csv")) 
+AC_23 <- read_csv(here::here("data/compiled_sheets/AC_compiledsheet_full_2023.csv")) 
 
 #organize the data
 AC_23 <- AC_23 %>%
@@ -1185,7 +1185,7 @@ ggplot(fam_wide, aes(x = diff)) +
 #######################
 #Read in the data
 #load year 2 (2023) life history data for BB site
-BB_23 <- read_csv(here::here("data_sheets/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
+BB_23 <- read_csv(here::here("data/compiled_sheets/BB_compiledsheet_full_2023.csv")) 
 
 #organize the data
 BB_23 <- BB_23 %>%
@@ -1220,7 +1220,7 @@ ggplot(fam_wide, aes(x = diff)) +
 #######################
 #Read in the data
 #load year 2 (2023) life history data for BO site
-BO_23 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
+BO_23 <- read_csv(here::here("data/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
 
 #organize the data
 BO_23 <- BO_23 %>%
@@ -1255,7 +1255,7 @@ ggplot(fam_wide, aes(x = diff)) +
 #######################
 #Read in the data
 #load year 2 (2023) life history data for HR site
-HR_23 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
+HR_23 <- read_csv(here::here("data/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
 
 #organize the data
 HR_23 <- HR_23 %>%

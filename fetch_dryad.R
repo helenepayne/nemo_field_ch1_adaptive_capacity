@@ -4,7 +4,7 @@
 # reads from data/.
 #
 # Usage:
-#   source(here::here("R", "fetch_dryad.R"))
+#   source(here::here("fetch_dryad.R"))
 #   fetch_dryad(c("AC_compiledsheet_full_2022.csv",
 #                 "AC_compiledsheet_full_2023.csv"))
 #

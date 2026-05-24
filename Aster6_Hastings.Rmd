@@ -16,7 +16,7 @@ library(stringr)
 library(here)
 
 #Read in the data
-HR_22<- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2022.csv")) 
+HR_22<- read_csv(here::here("data/compiled_sheets/HR_compiledsheet_full_2022.csv")) 
 
 #organize the data
 HR_22 <- HR_22 %>%
@@ -611,7 +611,7 @@ W
 # Hastings Ranch Generation 1 2023
 ```{r}
 #load year 2 (2023) life history data for HR site
-HR_23 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
+HR_23 <- read_csv(here::here("data/compiled_sheets/HR_compiledsheet_full_2023.csv")) 
 
 #organize the data
 HR_23 <- HR_23 %>%
@@ -1412,7 +1412,7 @@ cat("\nBoundary-corrected G×Y p:", gxy_lrt$`Pr(>Chisq)`[2] / 2, "\n")
 # stable. Spearman r is more robust. We also report sigma_Y1/sigma_Y2 as
 # a shrinkage-asymmetry diagnostic.
 
-site_code <- sub("Aster6_([A-Za-z]+)\.Rmd", "\1",
+site_code <- sub("Aster6_([A-Za-z]+)\\.Rmd", "\\1",
                  knitr::current_input())
 
 # resolve to 2-letter code

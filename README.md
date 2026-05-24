@@ -7,7 +7,7 @@ Code is adapted from Peschel and Shaw 2024.
 This repository contains only the Rmarkdown analysis scripts. The raw and
 processed data live in a Dryad data package (DOI
 [10.5061/dryad.pvmcvdp1p](https://doi.org/10.5061/dryad.pvmcvdp1p)) and are
-fetched on first run by `R/fetch_dryad.R`.
+fetched on first run by `fetch_dryad.R`.
 
 ## Provenance
 
@@ -27,8 +27,10 @@ that monorepo.
 
 ```
 .
-├── aster/                 # main analysis Rmds (one per site)
-├── R/fetch_dryad.R        # helper to download data from Dryad
+├── Aster6_*.Rmd           # main analysis Rmds (one per site)
+├── Aster_Figures_BV.Rmd   # figure generation
+├── Temp and Precip 2022 and 2023.Rmd
+├── fetch_dryad.R          # helper to download data from Dryad
 ├── data/                  # populated at runtime (gitignored)
 └── .mailmap               # unified author identities
 ```
@@ -38,7 +40,7 @@ that monorepo.
 1. Clone this repo.
 2. Open the project in RStudio (the `.Rmd` files use `here::here()` to resolve
    paths, so it just needs to be opened from the repo root).
-3. The first Rmd you knit will trigger `R/fetch_dryad.R`, which downloads the
+3. The first Rmd you knit will trigger `fetch_dryad.R`, which downloads the
    needed CSVs into `data/`. If the Dryad package is still private (it is
    embargoed until the manuscript is peer-reviewed), populate `data/` manually
    from your local copy:
@@ -55,7 +57,7 @@ that monorepo.
    └── HR_compiledsheet_full_2023.csv
    ```
 
-4. Knit any of `aster/Aster6_*.Rmd`.
+4. Knit any of `Aster6_*.Rmd`.
 
 ## Authors
 

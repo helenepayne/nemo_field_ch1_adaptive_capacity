@@ -11,7 +11,7 @@
 *_cache/
 
 # Data: not version-controlled. Fetched from Dryad on first run via
-# R/fetch_dryad.R, or populated manually from a private copy until the Dryad
+# fetch_dryad.R, or populated manually from a private copy until the Dryad
 # package is published.
 data/
 processed_data/
@@ -21,5 +21,3 @@ temp_precip/
 *.tif
 *.pdf
 
-# Data loaded by Rmds via here::here('data_sheets/compiled_sheets/...')
-data_sheets/

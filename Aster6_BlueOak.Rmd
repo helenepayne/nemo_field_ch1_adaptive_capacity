@@ -18,7 +18,7 @@ library(stringr)
 library(here)
 
 #Read in the data
-BO_22<- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2022.csv")) 
+BO_22<- read_csv(here::here("data/compiled_sheets/BO_compiledsheet_full_2022.csv")) 
 
 #organize the data
 BO_22 <- BO_22 %>%
@@ -620,7 +620,7 @@ W
 ##Generation 1 2023
 ```{r}
 #load year 2 (2023) life history data for BO site
-BO_23 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
+BO_23 <- read_csv(here::here("data/compiled_sheets/BO_compiledsheet_full_2023.csv")) 
 
 #organize the data
 BO_23 <- BO_23 %>%
@@ -1503,7 +1503,7 @@ cat("\nBoundary-corrected G×Y p:", gxy_lrt$`Pr(>Chisq)`[2] / 2, "\n")
 # can create apparent rank changes even when true breeding values are
 # stable. Spearman r is more robust. We also report sigma_Y1/sigma_Y2 as
 # a shrinkage-asymmetry diagnostic.
-site_code <- sub("Aster6_([A-Za-z]+)\.Rmd", "\1",
+site_code <- sub("Aster6_([A-Za-z]+)\\.Rmd", "\\1",
                  knitr::current_input())
 
 # resolve to 2-letter code
