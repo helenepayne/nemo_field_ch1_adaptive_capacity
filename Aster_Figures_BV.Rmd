@@ -18,8 +18,8 @@ library(scales)
 # Define site data
 locations <- data.frame(
   name = c("Angelo Coast (AC)", "Bodega Bay (BB)", "Blue Oak (BO)", "Hastings Ranch (HR)"),
-  lat = c(39.71812, 38.31805, 37.3813, 36.37909),
-  lon = c(-123.65304, -123.07173, -121.73674, -121.56288)
+  lat = c(39.7469, 38.3146, 37.3870, 36.3783),
+  lon = c(-123.6380, -123.0694, -121.7158, -121.5662)
 )
 
 # Custom color palette
@@ -320,8 +320,8 @@ df <- as.data.frame(temprast_tristate, xy = TRUE)
 
 # Data for the points and labels
 labels_data <- data.frame(
-  x = c(-123.65261752533642, -123.07109117331942, -121.73678882741571, -121.5627953728642),
-  y = c(39.70791443219262,38.31820208912606, 37.38236329564739, 36.3793508087087),
+  x = c(-123.6380, -123.0694, -121.7158, -121.5662),
+  y = c(39.7469, 38.3146, 37.3870, 36.3783),
   label = c("AC", "BB", "BO", "HR")
 )
 # To add a line break within the label, you can use "\n" in the label text:

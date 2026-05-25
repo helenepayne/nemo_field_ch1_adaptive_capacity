@@ -11,6 +11,9 @@
 *_cache/
 figures/
 
+# build.R per-render logs
+*.build.log
+
 # Data: not version-controlled. Fetched from Dryad on first run via
 # fetch_dryad.R, or populated manually from a private copy until the Dryad
 # package is published.
