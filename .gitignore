@@ -11,6 +11,9 @@
 *_cache/
 figures/
 
+# Claude Code settings (local to this machine)
+.claude/
+
 # build.R per-render logs
 *.build.log
 

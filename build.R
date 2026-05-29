@@ -3,9 +3,10 @@
 # End-to-end build for this analysis.
 #
 #   1. Fetch Dryad data into data/ (no-op if files already present).
-#   2. Knit Aster6_{Angelo,BlueOak,BodegaBay,Hastings}.Rmd to HTML in parallel.
-#   3. Knit Aster_Figures_BV.Rmd and "Temp and Precip 2022 and 2023.Rmd"
-#      to HTML in parallel (depends on tables/ produced in step 2).
+#   2. Create output directories (tables/, etc.).
+#   3. Knit Aster6_{Angelo,BlueOak,BodegaBay,Hastings}.Rmd to HTML in parallel.
+#   4. Knit Aster_Figures_BV.Rmd and "Temp and Precip 2022 and 2023.Rmd"
+#      to HTML in parallel (depends on tables/ produced in step 3).
 #
 # Usage:  Rscript build.R
 # ---------------------------------------------------------------------------
@@ -19,8 +20,7 @@ suppressPackageStartupMessages({
 setwd(here::here())
 
 # ---- 1. Fetch Dryad ---------------------------------------------------------
-source(here::here("fetch_dryad.R"))
-
+message("\n=== Step 1: Fetch Dryad data ===")
 dryad_files <- c(
   "AC_compiledsheet_full_2022.csv", "AC_compiledsheet_full_2023.csv",
   "BB_compiledsheet_full_2022.csv", "BB_compiledsheet_full_2023.csv",
@@ -31,13 +31,18 @@ dryad_files <- c(
   "w_bothyears.csv",
   "PRISM_tmean_30yr_normal.tif",    "PRISM_ppt_30yr_normal.tif"
 )
-fetch_dryad(dryad_files)
-
 missing <- dryad_files[!file.exists(file.path(here::here("data"), dryad_files))]
 if (length(missing) > 0) {
-  stop("Missing required data files in data/: ",
-       paste(missing, collapse = ", "),
-       "\nPopulate data/ manually or wait for Dryad release.")
+  source(here::here("fetch_dryad.R"))
+  fetch_dryad(missing)
+  missing <- dryad_files[!file.exists(file.path(here::here("data"), dryad_files))]
+  if (length(missing) > 0) {
+    stop("Missing required data files in data/: ",
+         paste(missing, collapse = ", "),
+         "\nPopulate data/ manually or wait for Dryad release.")
+  }
+} else {
+  message("All required data files present in data/ — skipping Dryad download.")
 }
 
 # ---- helpers ----------------------------------------------------------------
@@ -47,14 +52,18 @@ render_parallel <- function(rmds) {
   message("Rendering ", length(rmds), " Rmd(s) in parallel: ",
           paste(basename(rmds), collapse = ", "))
 
+  proj <- here::here()
   jobs <- lapply(rmds, function(rmd) {
+    abs_rmd <- here::here(rmd)
     log <- here::here(sub("\\.Rmd$", ".build.log", basename(rmd)))
     if (file.exists(log)) file.remove(log)
     proc <- callr::r_bg(
-      func = function(rmd) {
-        rmarkdown::render(rmd, output_format = "html_document", quiet = TRUE)
+      func = function(abs_rmd, proj) {
+        setwd(proj)
+        rmarkdown::render(abs_rmd, output_format = "html_document",
+                          knit_root_dir = proj, quiet = TRUE)
       },
-      args = list(rmd = rmd),
+      args = list(abs_rmd = abs_rmd, proj = proj),
       stdout = log, stderr = log,
       supervise = TRUE
     )
@@ -89,8 +98,14 @@ render_parallel <- function(rmds) {
   invisible(NULL)
 }
 
-# ---- 2. Aster6_*.Rmd in parallel -------------------------------------------
-message("\n=== Step 2: Aster6_*.Rmd ===")
+# ---- 2. Create output directories -------------------------------------------
+message("\n=== Step 2: Create output directories ===")
+dir.create(here::here("tables"),         showWarnings = FALSE)
+dir.create(here::here("figures"),        showWarnings = FALSE)
+dir.create(here::here("processed_data"), showWarnings = FALSE)
+
+# ---- 3. Aster6_*.Rmd in parallel -------------------------------------------
+message("\n=== Step 3: Aster6_*.Rmd ===")
 render_parallel(c(
   "Aster6_Angelo.Rmd",
   "Aster6_BlueOak.Rmd",
@@ -98,8 +113,8 @@ render_parallel(c(
   "Aster6_Hastings.Rmd"
 ))
 
-# ---- 3. Figures + Temp/Precip in parallel ----------------------------------
-message("\n=== Step 3: Figures + Temp/Precip ===")
+# ---- 4. Figures + Temp/Precip in parallel ----------------------------------
+message("\n=== Step 4: Figures + Temp/Precip ===")
 render_parallel(c(
   "Aster_Figures_BV.Rmd",
   "Temp and Precip 2022 and 2023.Rmd"
